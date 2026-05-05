@@ -12,11 +12,20 @@ import {
   Alert,
   Animated,
   ScrollView,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import auth from '@react-native-firebase/auth';
 import { useSession } from '../hooks/useSession';
-import type { SessionMember, SessionTask, Reaction } from '../types/Session';
+import { subscribeToUserProfile } from '../services/userService';
+import {
+  subscribeToJoinRequests,
+  approveJoinRequest,
+  denyJoinRequest,
+} from '../services/sessionService';
+import type { SessionMember, SessionTask, Reaction, JoinRequest } from '../types/Session';
 import { REACTION_OPTIONS, MAX_SESSION_TASKS, EXTEND_PRESETS } from '../types/Session';
+import type { UserProfile } from '../types/User';
 import type { AppScreenProps } from '../navigation/types';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,17 +103,29 @@ function PulsingDot() {
   );
 }
 
+// ─── Time estimate presets (mirrors solo mode) ────────────────────────────────
+
+const SESSION_TIME_PRESETS: { label: string; ms: number }[] = [
+  { label: '15m',   ms: 15 * 60 * 1000 },
+  { label: '30m',   ms: 30 * 60 * 1000 },
+  { label: '1h',    ms: 60 * 60 * 1000 },
+  { label: '2h',    ms: 2 * 60 * 60 * 1000 },
+  { label: '4h',    ms: 4 * 60 * 60 * 1000 },
+  { label: '1 day', ms: 24 * 60 * 60 * 1000 },
+];
+
 // ─── Add task modal ───────────────────────────────────────────────────────────
 
 type AddTaskModalProps = {
   visible: boolean;
   onClose: () => void;
-  onAdd: (title: string) => Promise<void>;
+  onAdd: (title: string, estimatedMs: number | null) => Promise<void>;
   atLimit: boolean;
 };
 
 function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
   const [text, setText] = useState('');
+  const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function handleAdd() {
@@ -112,8 +133,9 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
     if (!trimmed) { return; }
     setSaving(true);
     try {
-      await onAdd(trimmed);
+      await onAdd(trimmed, selectedMs);
       setText('');
+      setSelectedMs(null);
       onClose();
     } finally {
       setSaving(false);
@@ -122,6 +144,7 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
 
   function handleClose() {
     setText('');
+    setSelectedMs(null);
     onClose();
   }
 
@@ -159,6 +182,25 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
                 blurOnSubmit
                 onSubmitEditing={handleAdd}
               />
+              <Text style={styles.estimateLabel}>How long will it take?</Text>
+              <View style={styles.estimateRow}>
+                {SESSION_TIME_PRESETS.map(p => (
+                  <TouchableOpacity
+                    key={p.ms}
+                    style={[
+                      styles.estimateChip,
+                      selectedMs === p.ms && styles.estimateChipSelected,
+                    ]}
+                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
+                    <Text style={[
+                      styles.estimateChipText,
+                      selectedMs === p.ms && styles.estimateChipTextSelected,
+                    ]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TouchableOpacity
                 style={[styles.modalAddBtn, !text.trim() && styles.modalAddBtnDisabled]}
                 onPress={handleAdd}
@@ -315,6 +357,7 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
   const elapsed = now - task.createdAt;
   const isOld = elapsed > 86400 * 1000;
   const isDone = task.completedAt !== null;
+  const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
 
   if (isActive && !isDone) {
     // Focus card — large, prominent
@@ -325,9 +368,18 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
           <Text style={styles.focusLabel}>FOCUS</Text>
         </View>
         <Text style={styles.focusTitle}>{task.title}</Text>
-        <Text style={[styles.focusTimer, isOld && styles.focusTimerOld]}>
-          {formatElapsed(elapsed)}
-        </Text>
+        <View style={styles.focusTimerRow}>
+          <Text style={[styles.focusTimer, (isOld || overEstimate) && styles.focusTimerOld]}>
+            {formatElapsed(elapsed)}
+          </Text>
+          {task.estimatedMs != null && (
+            <Text style={[styles.focusEstimate, overEstimate && styles.focusEstimateOver]}>
+              {overEstimate
+                ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                : `est. ${formatElapsed(task.estimatedMs)}`}
+            </Text>
+          )}
+        </View>
         <View style={styles.focusActions}>
           <TouchableOpacity style={styles.focusDoneBtn} onPress={onComplete}>
             <Text style={styles.focusDoneBtnText}>Mark done</Text>
@@ -353,9 +405,18 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
           {task.title}
         </Text>
         {!isDone && (
-          <Text style={[styles.myTaskTimer, isOld && styles.myTaskTimerOld]}>
-            {formatElapsed(elapsed)}
-          </Text>
+          <View style={styles.myTaskMeta}>
+            <Text style={[styles.myTaskTimer, (isOld || overEstimate) && styles.myTaskTimerOld]}>
+              {formatElapsed(elapsed)}
+            </Text>
+            {task.estimatedMs != null && (
+              <Text style={[styles.myTaskEstimate, overEstimate && styles.myTaskEstimateOver]}>
+                {overEstimate
+                  ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                  : `est. ${formatElapsed(task.estimatedMs)}`}
+              </Text>
+            )}
+          </View>
         )}
         {isDone && (
           <Text style={styles.myTaskDoneLabel}>
@@ -414,6 +475,16 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
             ]}>
               {formatElapsed(now - activeTask.createdAt)}
             </Text>
+            {activeTask.estimatedMs != null && (
+              <Text style={[
+                styles.partnerEstimate,
+                now - activeTask.createdAt > activeTask.estimatedMs && styles.partnerEstimateOver,
+              ]}>
+                {now - activeTask.createdAt > activeTask.estimatedMs
+                  ? `over by ${formatElapsed((now - activeTask.createdAt) - activeTask.estimatedMs)}`
+                  : `est. ${formatElapsed(activeTask.estimatedMs)}`}
+              </Text>
+            )}
             <TouchableOpacity
               style={styles.reactBtnFocus}
               onPress={() => onReact(activeTask.taskId)}
@@ -448,6 +519,16 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
                   {formatElapsed(elapsed)}
                 </Text>
               )}
+              {!isDone && task.estimatedMs != null && (
+                <Text style={[
+                  styles.partnerEstimate,
+                  elapsed > task.estimatedMs && styles.partnerEstimateOver,
+                ]}>
+                  {elapsed > task.estimatedMs
+                    ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                    : `est. ${formatElapsed(task.estimatedMs)}`}
+                </Text>
+              )}
               {isDone && (
                 <Text style={styles.partnerTaskDoneLabel}>
                   Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
@@ -468,6 +549,50 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
           </View>
         );
       })}
+    </View>
+  );
+}
+
+// ─── Join request popup (host sees this) ─────────────────────────────────────
+
+type JoinRequestPopupProps = {
+  request: JoinRequest;
+  onApprove: () => void;
+  onDeny: () => void;
+  busy: boolean;
+};
+
+function JoinRequestPopup({ request, onApprove, onDeny, busy }: JoinRequestPopupProps) {
+  return (
+    <View style={styles.joinPopupOverlay} pointerEvents="box-none">
+      <View style={styles.joinPopupCard}>
+        <View style={styles.joinPopupHeader}>
+          <View style={styles.joinPopupDot} />
+          <Text style={styles.joinPopupName}>{request.displayName}</Text>
+          <Text style={styles.joinPopupLabel}>wants to join</Text>
+        </View>
+        {request.tasks.length > 0 && (
+          <Text style={styles.joinPopupMeta}>
+            Bringing {request.tasks.length} task{request.tasks.length !== 1 ? 's' : ''}
+          </Text>
+        )}
+        <View style={styles.joinPopupBtns}>
+          <TouchableOpacity
+            style={[styles.joinDenyBtn, busy && styles.joinBtnDisabled]}
+            onPress={onDeny}
+            disabled={busy}>
+            <Text style={styles.joinDenyBtnText}>Not now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.joinApproveBtn, busy && styles.joinBtnDisabled]}
+            onPress={onApprove}
+            disabled={busy}>
+            {busy
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={styles.joinApproveBtnText}>Let them in</Text>}
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
@@ -522,17 +647,89 @@ export default function SessionScreen({ route, navigation }: Props) {
     canReact,
     myReactionCountForTask,
     endSession,
+    clearActiveSession,
+    leaveSession,
     extendSession,
     addTask,
     completeTask,
     setActiveTask,
     sendReaction,
+    syncMyTasksToSolo,
   } = useSession(sessionId);
 
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [reactionTarget, setReactionTarget] = useState<{ toUserId: string; taskId: string } | null>(null);
+
+  // Invite code chip
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const currentUser = auth().currentUser;
+  useEffect(() => {
+    if (!currentUser?.uid) { return; }
+    const unsub = subscribeToUserProfile(currentUser.uid, setUserProfile);
+    return unsub;
+  }, [currentUser?.uid]);
+
+  // Join requests (host only)
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [handlingRequest, setHandlingRequest] = useState(false);
+  useEffect(() => {
+    if (!isHost || !sessionId) { return; }
+    const unsub = subscribeToJoinRequests(sessionId, setJoinRequests);
+    return unsub;
+  }, [isHost, sessionId]);
+
+  const pendingRequest = joinRequests[0] ?? null;
+
+  async function handleApproveRequest(req: JoinRequest) {
+    setHandlingRequest(true);
+    try {
+      await approveJoinRequest(sessionId, req.id, req.userId);
+      flash(`${req.displayName} is in!`);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Could not approve request.');
+    } finally {
+      setHandlingRequest(false);
+    }
+  }
+
+  async function handleDenyRequest(req: JoinRequest) {
+    setHandlingRequest(true);
+    try {
+      await denyJoinRequest(sessionId, req.id);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Could not deny request.');
+    } finally {
+      setHandlingRequest(false);
+    }
+  }
+
+  // "X joined" notification + record partner from this user's own side
+  const prevMemberCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (loading) { return; }
+    const prev = prevMemberCountRef.current;
+    if (prev !== null && members.length > prev) {
+      const newMembers = members.filter(
+        m => m.userId !== userId && m.joinedAt > (Date.now() - 10000),
+      );
+      if (newMembers.length > 0) {
+        flash(`${newMembers[0].displayName} joined the session.`);
+        // Record the new member as a partner from the current user's own profile
+        import('../services/userService').then(({ recordSessionPartner }) => {
+          newMembers.forEach(m => {
+            recordSessionPartner(userId, {
+              userId: m.userId,
+              username: m.displayName,
+              lastSessionAt: Date.now(),
+            }).catch(console.error);
+          });
+        });
+      }
+    }
+    prevMemberCountRef.current = members.length;
+  }, [members, loading, userId, flash]);
 
   const myActiveTasks = myMember?.tasks.filter(t => t.completedAt === null) ?? [];
   const atLimit = (myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS;
@@ -541,18 +738,38 @@ export default function SessionScreen({ route, navigation }: Props) {
   const timerExpired = timeLeft !== null && timeLeft <= 0 && session?.status === 'active';
   const sessionEnded = session?.status === 'ended';
 
+  // When the session ends, each user clears their own activeSessionId and syncs
+  // session-only tasks back to Solo. (The host already cleared their own inside
+  // endSession; calling it again is a harmless no-op for the host.)
+  const syncedOnEndRef = useRef(false);
+  useEffect(() => {
+    if (sessionEnded && !syncedOnEndRef.current) {
+      syncedOnEndRef.current = true;
+      clearActiveSession().catch(console.error);
+      syncMyTasksToSolo().catch(console.error);
+    }
+  }, [sessionEnded, clearActiveSession, syncMyTasksToSolo]);
+
   // Host name for the extend overlay non-host message
   const hostMember = members.find(m => m.userId === session?.createdBy);
   const hostName = hostMember?.displayName ?? 'the host';
 
-  async function handleAddTask(title: string) {
+  async function handleAddTask(title: string, estimatedMs: number | null) {
     const newTask: SessionTask = {
       taskId: `${userId}-${Date.now()}`,
       title,
       createdAt: Date.now(),
       completedAt: null,
+      estimatedMs,
     };
     await addTask(newTask);
+  }
+
+  async function handleLeave() {
+    // Sync session-only tasks to Solo before removing the member document.
+    await syncMyTasksToSolo().catch(console.error);
+    leaveSession().catch(console.error);
+    navigation.popToTop();
   }
 
   async function handleCompleteTask(task: SessionTask) {
@@ -637,6 +854,18 @@ export default function SessionScreen({ route, navigation }: Props) {
               <Text style={styles.endBtnText}>End</Text>
             </TouchableOpacity>
           )}
+          {!isHost && (
+            <TouchableOpacity
+              style={styles.leaveBtn}
+              onPress={() =>
+                Alert.alert('Leave session?', 'You can rejoin later using the host\'s invite code.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Leave', style: 'destructive', onPress: handleLeave },
+                ])
+              }>
+              <Text style={styles.leaveBtnText}>Leave</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -696,6 +925,18 @@ export default function SessionScreen({ route, navigation }: Props) {
           </View>
         )}
 
+        {/* Invite code — shown while nobody else has joined yet */}
+        {otherMembers.length === 0 && userProfile?.personalInviteCode && (
+          <TouchableOpacity
+            style={styles.inviteCard}
+            onPress={() => Share.share({ message: userProfile.personalInviteCode })}
+            activeOpacity={0.7}>
+            <Text style={styles.inviteCardLabel}>YOUR INVITE CODE</Text>
+            <Text style={styles.inviteCardCode}>{userProfile.personalInviteCode}</Text>
+            <Text style={styles.inviteCardHint}>Tap to share · disappears when someone joins</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Partner tasks */}
         {otherMembers.length === 0 && (
           <View style={styles.section}>
@@ -714,6 +955,16 @@ export default function SessionScreen({ route, navigation }: Props) {
           </View>
         ))}
       </ScrollView>
+
+      {/* Join request popup — host only, sits above everything */}
+      {pendingRequest && (
+        <JoinRequestPopup
+          request={pendingRequest}
+          onApprove={() => handleApproveRequest(pendingRequest)}
+          onDeny={() => handleDenyRequest(pendingRequest)}
+          busy={handlingRequest}
+        />
+      )}
 
       {/* Modals */}
       <AddTaskModal
@@ -837,6 +1088,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  // Invite card (shown in scroll body while no one has joined)
+  inviteCard: {
+    backgroundColor: '#13132a',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    padding: 20,
+    alignItems: 'center',
+    gap: 6,
+  },
+  inviteCardLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 2,
+  },
+  inviteCardCode: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#f5f5f5',
+    letterSpacing: 8,
+    fontVariant: ['tabular-nums'],
+  },
+  inviteCardHint: {
+    fontSize: 11,
+    color: '#444',
+    marginTop: 2,
+  },
   endBtn: {
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -846,6 +1125,17 @@ const styles = StyleSheet.create({
   },
   endBtnText: {
     color: '#555',
+    fontSize: 13,
+  },
+  leaveBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#3d1a1a',
+  },
+  leaveBtnText: {
+    color: '#c0392b',
     fontSize: 13,
   },
 
@@ -937,15 +1227,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 26,
   },
+  focusTimerRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    flexWrap: 'wrap',
+    marginBottom: 4,
+  },
   focusTimer: {
     color: '#8b8cf4',
     fontSize: 16,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
-    marginBottom: 4,
   },
   focusTimerOld: {
     color: '#c0392b',
+  },
+  focusEstimate: {
+    color: '#555',
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  focusEstimateOver: {
+    color: '#8b2e2e',
   },
   focusActions: {
     flexDirection: 'row',
@@ -1005,6 +1309,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2a2a',
   },
   myTaskInfo: { flex: 1, gap: 2 },
+  myTaskMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
   myTaskTitle: {
     color: '#f5f5f5',
     fontSize: 15,
@@ -1020,6 +1330,12 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   myTaskTimerOld: { color: '#c0392b' },
+  myTaskEstimate: {
+    color: '#555',
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  myTaskEstimateOver: { color: '#8b2e2e' },
   myTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
   myDoneBtn: {
     borderRadius: 7,
@@ -1147,6 +1463,8 @@ const styles = StyleSheet.create({
   },
   partnerTaskTimerOld: { color: '#8b2e2e' },
   partnerTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
+  partnerEstimate: { color: '#888', fontSize: 11 },
+  partnerEstimateOver: { color: '#c0392b' },
   partnerReactionBubble: {
     color: '#6366f1',
     fontSize: 12,
@@ -1285,6 +1603,37 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     minHeight: 52,
   },
+  estimateLabel: {
+    color: '#555',
+    fontSize: 13,
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  estimateRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  estimateChip: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+  },
+  estimateChipSelected: {
+    backgroundColor: '#f5f5f5',
+    borderColor: '#f5f5f5',
+  },
+  estimateChipText: {
+    color: '#888',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  estimateChipTextSelected: {
+    color: '#0d0d0d',
+  },
   modalAddBtn: {
     backgroundColor: '#f5f5f5',
     borderRadius: 10,
@@ -1356,6 +1705,86 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
   },
   reactionCloseBtnText: { color: '#555', fontSize: 14 },
+
+  // Join request popup
+  joinPopupOverlay: {
+    position: 'absolute',
+    bottom: 100,
+    left: 16,
+    right: 16,
+    zIndex: 200,
+  },
+  joinPopupCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#6366f1',
+    padding: 18,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  joinPopupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  joinPopupDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#6366f1',
+  },
+  joinPopupName: {
+    color: '#f5f5f5',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  joinPopupLabel: {
+    color: '#888',
+    fontSize: 14,
+  },
+  joinPopupMeta: {
+    color: '#555',
+    fontSize: 13,
+    paddingLeft: 16,
+  },
+  joinPopupBtns: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  joinDenyBtn: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  joinDenyBtnText: {
+    color: '#555',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  joinApproveBtn: {
+    flex: 2,
+    borderRadius: 10,
+    backgroundColor: '#6366f1',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  joinApproveBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  joinBtnDisabled: {
+    opacity: 0.5,
+  },
 
   // Session ended
   endedOverlay: {

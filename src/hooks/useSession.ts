@@ -4,8 +4,8 @@ import {
   subscribeToSession,
   subscribeToMembers,
   subscribeToReactions,
-  startSession as svcStart,
   endSession as svcEnd,
+  leaveSession as svcLeave,
   extendSession as svcExtend,
   addTaskToSession as svcAddTask,
   removeTaskFromSession as svcRemoveTask,
@@ -13,7 +13,11 @@ import {
   setActiveTask as svcSetActive,
   sendReaction as svcSendReaction,
 } from '../services/sessionService';
-import { completeTask as svcCompleteSoloTask } from '../services/taskService';
+import { setActiveSession } from '../services/userService';
+import {
+  completeTask as svcCompleteSoloTask,
+  addTaskFromSession as svcAddTaskFromSession,
+} from '../services/taskService';
 import type { Session, SessionMember, SessionTask, Reaction } from '../types/Session';
 import { MAX_REACTIONS_PER_TASK } from '../types/Session';
 
@@ -63,14 +67,20 @@ export function useSession(sessionId: string) {
     [myReactionCountForTask],
   );
 
-  const startSession = useCallback(() => {
-    if (!session) { return Promise.resolve(); }
-    return svcStart(sessionId, session.durationMs);
-  }, [sessionId, session]);
-
   const endSession = useCallback(
-    () => svcEnd(sessionId),
-    [sessionId],
+    () => svcEnd(sessionId, userId),
+    [sessionId, userId],
+  );
+
+  /** Clear the current user's activeSessionId — used by non-hosts on session end. */
+  const clearActiveSession = useCallback(
+    () => setActiveSession(userId, null),
+    [userId],
+  );
+
+  const leaveSession = useCallback(
+    () => svcLeave(sessionId, userId),
+    [sessionId, userId],
   );
 
   const extendSession = useCallback(
@@ -119,6 +129,29 @@ export function useSession(sessionId: string) {
     [sessionId, userId, canReact],
   );
 
+  /**
+   * Copy session-only tasks (no sourceSoloTaskId) back to the user's Solo task
+   * list, preserving completedAt so finished work appears in history.
+   * Tasks that were imported from Solo mode are already there — nothing to do.
+   */
+  const syncMyTasksToSolo = useCallback(async () => {
+    if (!myMember) { return; }
+    const sessionOnlyTasks = myMember.tasks.filter(t => !t.sourceSoloTaskId);
+    if (sessionOnlyTasks.length === 0) { return; }
+    await Promise.all(
+      sessionOnlyTasks.map(task =>
+        svcAddTaskFromSession(userId, {
+          title: task.title,
+          createdAt: task.createdAt,
+          completedAt: task.completedAt,
+          estimatedMs: task.estimatedMs ?? null,
+        }).catch(err =>
+          console.warn('[useSession] syncMyTasksToSolo failed for task:', task.title, err.message),
+        ),
+      ),
+    );
+  }, [myMember, userId]);
+
   return {
     session,
     members,
@@ -131,13 +164,15 @@ export function useSession(sessionId: string) {
     isHost,
     myReactionCountForTask,
     canReact,
-    startSession,
     endSession,
+    clearActiveSession,
+    leaveSession,
     extendSession,
     addTask,
     removeTask,
     completeTask,
     setActiveTask,
     sendReaction,
+    syncMyTasksToSolo,
   };
 }

@@ -22,6 +22,32 @@ export async function addTask(
   await ref.set(task);
 }
 
+/**
+ * Write a task with explicit timestamps — used to port session tasks back to Solo
+ * while preserving the original createdAt (and completedAt if already done).
+ */
+export async function addTaskFromSession(
+  userId: string,
+  data: {
+    title: string;
+    createdAt: number;
+    completedAt: number | null;
+    estimatedMs: number | null;
+  },
+): Promise<void> {
+  const ref = tasksCollection(userId).doc();
+  const task: Task = {
+    id: ref.id,
+    userId,
+    title: data.title,
+    createdAt: data.createdAt,
+    completedAt: data.completedAt,
+    estimatedMs: data.estimatedMs,
+    isPublic: false,
+  };
+  await ref.set(task);
+}
+
 export async function completeTask(userId: string, taskId: string): Promise<void> {
   await tasksCollection(userId).doc(taskId).update({
     completedAt: Date.now(),

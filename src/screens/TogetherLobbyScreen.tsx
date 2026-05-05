@@ -8,35 +8,36 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
-  Animated,
   Platform,
+  ScrollView,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import {
   createSession,
-  joinSession,
-  startSession,
-  findSessionByCode,
-  subscribeToSession,
-  subscribeToMembers,
+  findActiveSessionByInviteCode,
+  addTaskToSession,
+  requestToJoin,
+  completeJoin,
+  subscribeToJoinRequest,
 } from '../services/sessionService';
+import { subscribeToUserProfile } from '../services/userService';
 import { useTasks } from '../hooks/useTasks';
-import type { Session, SessionMember, SessionTask } from '../types/Session';
 import { SESSION_DURATION_PRESETS } from '../types/Session';
+import type { SessionTask, JoinRequest } from '../types/Session';
+import type { UserProfile, SessionPartner } from '../types/User';
 import type { Task } from '../types/Task';
 import type { AppScreenProps } from '../navigation/types';
 
 type Props = AppScreenProps<'TogetherLobby'>;
 
-type Mode = 'pick' | 'task-selection' | 'hosting' | 'joining';
-
-// Tracks what the user chose before task selection
-type PendingCreate = { kind: 'create'; durationMs: number };
-type PendingJoin   = { kind: 'join'; sessionId: string; durationMs: number };
+type Mode = 'pick' | 'task-selection' | 'waiting-approval';
+type PendingCreate = { kind: 'create'; sessionId: string; durationMs: number };
+type PendingJoin   = { kind: 'join';   sessionId: string; durationMs: number; hostUsername: string };
 type Pending = PendingCreate | PendingJoin;
 
-// ─── Elapsed time helper (shared with solo) ───────────────────────────────────
+// ─── Elapsed helper ───────────────────────────────────────────────────────────
 
 function formatElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -56,9 +57,11 @@ type TaskSelectionProps = {
   activeTasks: Task[];
   tasksLoading: boolean;
   selectedIds: Set<string>;
+  subtitle: string;
   onToggle: (id: string) => void;
   onConfirm: () => void;
   confirming: boolean;
+  onBack: () => void;
   now: number;
 };
 
@@ -66,173 +69,132 @@ function TaskSelection({
   activeTasks,
   tasksLoading,
   selectedIds,
+  subtitle,
   onToggle,
   onConfirm,
   confirming,
+  onBack,
   now,
 }: TaskSelectionProps) {
   return (
-    <View style={styles.selectionContainer}>
-      <Text style={styles.selectionTitle}>Bring tasks into the session</Text>
-      <Text style={styles.selectionSubtitle}>
-        Pick up to 6 tasks from your Solo list to work on together.
-        Anything you don't complete will stay in Solo mode.
-      </Text>
-
-      {tasksLoading && (
-        <ActivityIndicator color="#f5f5f5" style={styles.selectionLoader} />
-      )}
-
-      {!tasksLoading && activeTasks.length === 0 && (
-        <View style={styles.selectionEmpty}>
-          <Text style={styles.selectionEmptyText}>No active Solo tasks yet.</Text>
-          <Text style={styles.selectionEmptyHint}>
-            You can still add tasks once the session starts.
-          </Text>
+    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+      <View style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+          <Text style={styles.backBtnText}>← Back</Text>
+        </TouchableOpacity>
+        <View style={styles.headerTitleGroup}>
+          <Text style={styles.headerTitle}>Together</Text>
+          <View style={styles.modeBadge}>
+            <Text style={styles.modeBadgeText}>{subtitle}</Text>
+          </View>
         </View>
-      )}
+      </View>
 
-      {!tasksLoading && activeTasks.length > 0 && (
-        <FlatList
-          data={activeTasks}
-          keyExtractor={t => t.id}
-          style={styles.selectionList}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item }) => {
-            const checked = selectedIds.has(item.id);
-            const elapsed = now - item.createdAt;
-            const atLimit = selectedIds.size >= 6 && !checked;
-            return (
-              <TouchableOpacity
-                style={[
-                  styles.selectionRow,
-                  checked && styles.selectionRowChecked,
-                  atLimit && styles.selectionRowDisabled,
-                ]}
-                onPress={() => !atLimit && onToggle(item.id)}
-                activeOpacity={atLimit ? 1 : 0.7}>
-                <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-                  {checked && <Text style={styles.checkmark}>✓</Text>}
-                </View>
-                <View style={styles.selectionTaskInfo}>
-                  <Text
-                    style={[styles.selectionTaskTitle, atLimit && styles.selectionTaskTitleDim]}
-                    numberOfLines={2}>
-                    {item.title}
-                  </Text>
-                  <Text style={styles.selectionTaskTimer}>{formatElapsed(elapsed)}</Text>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      )}
+      <View style={styles.selectionContainer}>
+        <Text style={styles.selectionTitle}>Bring tasks into the session</Text>
+        <Text style={styles.selectionSubtitle}>
+          Pick up to 6 tasks from your Solo list. Anything you don't complete stays in Solo.
+        </Text>
 
-      <TouchableOpacity
-        style={[styles.actionBtn, confirming && styles.actionBtnDisabled]}
-        onPress={onConfirm}
-        disabled={confirming}>
-        {confirming
-          ? <ActivityIndicator color="#0d0d0d" />
-          : (
-            <Text style={styles.actionBtnText}>
-              {selectedIds.size > 0
-                ? `Continue with ${selectedIds.size} task${selectedIds.size !== 1 ? 's' : ''}`
-                : 'Continue without tasks'}
+        {tasksLoading && (
+          <ActivityIndicator color="#f5f5f5" style={styles.selectionLoader} />
+        )}
+
+        {!tasksLoading && activeTasks.length === 0 && (
+          <View style={styles.selectionEmpty}>
+            <Text style={styles.selectionEmptyText}>No active Solo tasks yet.</Text>
+            <Text style={styles.selectionEmptyHint}>
+              You can still add tasks once the session starts.
             </Text>
-          )}
-      </TouchableOpacity>
-    </View>
+          </View>
+        )}
+
+        {!tasksLoading && activeTasks.length > 0 && (
+          <FlatList
+            data={activeTasks}
+            keyExtractor={t => t.id}
+            style={styles.selectionList}
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item }) => {
+              const checked = selectedIds.has(item.id);
+              const elapsed = now - item.createdAt;
+              const atLimit = selectedIds.size >= 6 && !checked;
+              return (
+                <TouchableOpacity
+                  style={[
+                    styles.selectionRow,
+                    checked && styles.selectionRowChecked,
+                    atLimit && styles.selectionRowDisabled,
+                  ]}
+                  onPress={() => !atLimit && onToggle(item.id)}
+                  activeOpacity={atLimit ? 1 : 0.7}>
+                  <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+                    {checked && <Text style={styles.checkmark}>✓</Text>}
+                  </View>
+                  <View style={styles.selectionTaskInfo}>
+                    <Text
+                      style={[styles.selectionTaskTitle, atLimit && styles.selectionTaskTitleDim]}
+                      numberOfLines={2}>
+                      {item.title}
+                    </Text>
+                    <Text style={styles.selectionTaskTimer}>{formatElapsed(elapsed)}</Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        )}
+
+        <TouchableOpacity
+          style={[styles.actionBtn, confirming && styles.actionBtnDisabled]}
+          onPress={onConfirm}
+          disabled={confirming}>
+          {confirming
+            ? <ActivityIndicator color="#0d0d0d" />
+            : (
+              <Text style={styles.actionBtnText}>
+                {selectedIds.size > 0
+                  ? `Start with ${selectedIds.size} task${selectedIds.size !== 1 ? 's' : ''}`
+                  : 'Start without tasks'}
+              </Text>
+            )}
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
-// ─── Lobby waiting room ───────────────────────────────────────────────────────
+// ─── Partner history row ──────────────────────────────────────────────────────
 
-type LobbyWaitProps = {
-  session: Session;
-  members: SessionMember[];
-  isHost: boolean;
-  onStart: () => Promise<void>;
-  onLeave: () => void;
+type PartnerRowProps = {
+  partner: SessionPartner;
+  onJoin: () => void;
+  joining: boolean;
 };
 
-function LobbyWaitingRoom({ session, members, isHost, onStart, onLeave }: LobbyWaitProps) {
-  const [starting, setStarting] = useState(false);
-  const dotAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(dotAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(dotAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [dotAnim]);
-
-  const dotOpacity = dotAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
-  const canStart = members.length >= 2;
-  const durationLabel =
-    SESSION_DURATION_PRESETS.find(p => p.ms === session.durationMs)?.label ??
-    `${Math.round(session.durationMs / 60000)} min`;
-
-  async function handleStart() {
-    setStarting(true);
-    try {
-      await onStart();
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not start session.');
-      setStarting(false);
-    }
-  }
+function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
+  const elapsed = Date.now() - partner.lastSessionAt;
+  const label = elapsed < 60000
+    ? 'just now'
+    : elapsed < 3600000
+      ? `${Math.floor(elapsed / 60000)}m ago`
+      : elapsed < 86400000
+        ? `${Math.floor(elapsed / 3600000)}h ago`
+        : `${Math.floor(elapsed / 86400000)}d ago`;
 
   return (
-    <View style={styles.lobbyContainer}>
-      <View style={styles.lobbyCard}>
-        <Text style={styles.lobbyLabel}>INVITE CODE</Text>
-        <Text style={styles.inviteCode}>{session.inviteCode}</Text>
-        <Text style={styles.lobbyMeta}>{durationLabel} session</Text>
+    <View style={styles.partnerRow}>
+      <View style={styles.partnerInfo}>
+        <Text style={styles.partnerName}>{partner.username}</Text>
+        <Text style={styles.partnerMeta}>Last session {label}</Text>
       </View>
-
-      <View style={styles.lobbyParticipants}>
-        <Text style={styles.lobbyParticipantsLabel}>
-          {members.length} {members.length === 1 ? 'person' : 'people'} in the room
-        </Text>
-        {members.map(m => (
-          <View key={m.userId} style={styles.participantRow}>
-            <View style={styles.participantDot} />
-            <Text style={styles.participantName}>{m.displayName}</Text>
-            <Text style={styles.participantTaskCount}>
-              {m.tasks.length > 0 ? `${m.tasks.length} task${m.tasks.length !== 1 ? 's' : ''}` : ''}
-            </Text>
-          </View>
-        ))}
-        {!canStart && (
-          <View style={styles.waitingRow}>
-            <Animated.View style={[styles.waitingDot, { opacity: dotOpacity }]} />
-            <Text style={styles.waitingText}>Waiting for someone to join…</Text>
-          </View>
-        )}
-      </View>
-
-      {isHost ? (
-        <TouchableOpacity
-          style={[styles.startBtn, !canStart && styles.startBtnDisabled]}
-          onPress={handleStart}
-          disabled={!canStart || starting}>
-          {starting
-            ? <ActivityIndicator color="#0d0d0d" />
-            : <Text style={styles.startBtnText}>Start session</Text>}
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.guestWait}>
-          <Text style={styles.guestWaitText}>Waiting for the host to start…</Text>
-        </View>
-      )}
-
-      <TouchableOpacity style={styles.leaveBtn} onPress={onLeave}>
-        <Text style={styles.leaveBtnText}>Leave</Text>
+      <TouchableOpacity
+        style={[styles.joinPartnerBtn, joining && styles.joinPartnerBtnDisabled]}
+        onPress={onJoin}
+        disabled={joining}>
+        {joining
+          ? <ActivityIndicator color="#6366f1" size="small" />
+          : <Text style={styles.joinPartnerBtnText}>Join</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -242,45 +204,77 @@ function LobbyWaitingRoom({ session, members, isHost, onStart, onLeave }: LobbyW
 
 export default function TogetherLobbyScreen({ navigation }: Props) {
   const user = auth().currentUser!;
-  const displayName = user.displayName ?? user.email?.split('@')[0] ?? 'Anonymous';
 
   const { activeTasks, loading: tasksLoading } = useTasks();
 
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [mode, setMode] = useState<Mode>('pick');
   const [pending, setPending] = useState<Pending | null>(null);
   const [selectedDurationMs, setSelectedDurationMs] = useState(SESSION_DURATION_PRESETS[0].ms);
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
-
-  // Checked task IDs in the selection step
+  const [joiningPartnerId, setJoiningPartnerId] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  // Join request waiting state
+  const [joinRequestId, setJoinRequestId] = useState<string | null>(null);
+  const [joinRequestSessionId, setJoinRequestSessionId] = useState<string | null>(null);
+  const dotAnim = useRef(new Animated.Value(0)).current;
 
-  // Live ticker for elapsed times in selection list
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 10000);
     return () => clearInterval(id);
   }, []);
 
-  // Lobby state after creation/join
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [liveSession, setLiveSession] = useState<Session | null>(null);
-  const [liveMembers, setLiveMembers] = useState<SessionMember[]>([]);
-
   useEffect(() => {
-    if (!sessionId) { return; }
-    const unsubS = subscribeToSession(sessionId, s => setLiveSession(s));
-    const unsubM = subscribeToMembers(sessionId, m => setLiveMembers(m));
-    return () => { unsubS(); unsubM(); };
-  }, [sessionId]);
+    const unsub = subscribeToUserProfile(user.uid, setUserProfile);
+    return unsub;
+  }, [user.uid]);
 
-  // Navigate once host starts
+  // Pulsing dot animation for waiting screen
   useEffect(() => {
-    if (liveSession?.status === 'active' && sessionId) {
-      navigation.replace('Session', { sessionId });
-    }
-  }, [liveSession, sessionId, navigation]);
+    if (mode !== 'waiting-approval') { return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(dotAnim, { toValue: 0, duration: 700, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [mode, dotAnim]);
+
+  // Subscribe to join request status changes
+  useEffect(() => {
+    if (!joinRequestId || !joinRequestSessionId) { return; }
+    const unsub = subscribeToJoinRequest(
+      joinRequestSessionId,
+      joinRequestId,
+      async (req: JoinRequest | null) => {
+        if (!req) { return; }
+        if (req.status === 'approved') {
+          try {
+            await completeJoin(joinRequestSessionId, req);
+            navigation.replace('Session', { sessionId: joinRequestSessionId });
+          } catch (e: any) {
+            Alert.alert('Error', e?.message ?? 'Could not complete joining.');
+            setMode('pick');
+            setJoinRequestId(null);
+            setJoinRequestSessionId(null);
+          }
+        } else if (req.status === 'denied') {
+          Alert.alert('Not this time', 'The host didn\'t let you in. Try again later.');
+          setMode('pick');
+          setJoinRequestId(null);
+          setJoinRequestSessionId(null);
+        }
+      },
+    );
+    return unsub;
+  }, [joinRequestId, joinRequestSessionId, navigation]);
+
+  const displayName = userProfile?.username ?? user.displayName ?? user.email?.split('@')[0] ?? 'Anonymous';
 
   function toggleTask(id: string) {
     setSelectedTaskIds(prev => {
@@ -299,18 +293,16 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         title: t.title,
         createdAt: t.createdAt,
         completedAt: null,
+        estimatedMs: t.estimatedMs ?? null,
       }));
   }
 
-  // ── Step 1 handlers ───────────────────────────────────
+  // ── Step 1: Host ───────────────────────────────────────
   async function handleHost() {
     setLoading(true);
     try {
-      // Create session early so we have an invite code to show in the lobby.
-      // Tasks will be applied in the confirmation step.
-      const id = await createSession(user.uid, displayName, selectedDurationMs, []);
-      setSessionId(id);
-      setPending({ kind: 'create', durationMs: selectedDurationMs });
+      const sessionId = await createSession(user.uid, displayName, selectedDurationMs, []);
+      setPending({ kind: 'create', sessionId, durationMs: selectedDurationMs });
       setSelectedTaskIds(new Set());
       setMode('task-selection');
     } catch (e: any) {
@@ -320,6 +312,7 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
+  // ── Step 1: Join by code ───────────────────────────────
   async function handleJoinFind() {
     const code = joinCode.trim();
     if (code.length < 6) {
@@ -328,12 +321,12 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
     setLoading(true);
     try {
-      const result = await findSessionByCode(code);
+      const result = await findActiveSessionByInviteCode(code);
       if (!result) {
-        Alert.alert('Not found', 'No open session with that code. Check the code and try again.');
+        Alert.alert('Not found', 'No active session found for that code. Ask your partner to start a session first.');
         return;
       }
-      setPending({ kind: 'join', sessionId: result.sessionId, durationMs: result.durationMs });
+      setPending({ kind: 'join', sessionId: result.sessionId, durationMs: result.durationMs, hostUsername: result.hostUsername });
       setSelectedTaskIds(new Set());
       setMode('task-selection');
     } catch (e: any) {
@@ -343,28 +336,56 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
-  // ── Step 2 (task selection) confirmation ──────────────
+  // ── Step 1: Join from partner history ─────────────────
+  async function handleJoinPartner(partner: SessionPartner) {
+    setJoiningPartnerId(partner.userId);
+    try {
+      const partnerProfile = await import('../services/userService').then(m => m.getUserProfile(partner.userId));
+      if (!partnerProfile?.activeSessionId) {
+        Alert.alert('No active session', `${partner.username} isn't in a session right now.`);
+        return;
+      }
+      const { findActiveSessionByInviteCode: findByCode } = await import('../services/sessionService');
+      const sessionDoc = await import('@react-native-firebase/firestore').then(m =>
+        m.default().collection('sessions').doc(partnerProfile.activeSessionId!).get(),
+      );
+      if (!sessionDoc.exists) {
+        Alert.alert('Session ended', 'That session has already ended.');
+        return;
+      }
+      const session = sessionDoc.data() as { status: string; durationMs: number };
+      if (session.status !== 'active') {
+        Alert.alert('Session ended', 'That session has already ended.');
+        return;
+      }
+      setPending({ kind: 'join', sessionId: partnerProfile.activeSessionId, durationMs: session.durationMs, hostUsername: partner.username });
+      setSelectedTaskIds(new Set());
+      setMode('task-selection');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message ?? 'Could not join partner session.');
+    } finally {
+      setJoiningPartnerId(null);
+    }
+  }
+
+  // ── Step 2: Confirm task selection ────────────────────
   async function handleConfirmTasks() {
     if (!pending) { return; }
     const tasks = buildSessionTasks();
     setConfirming(true);
     try {
       if (pending.kind === 'create') {
-        // Session was already created; update the member doc with chosen tasks
-        // by re-using addTaskToSession calls — or simpler: patch member doc directly.
-        // We leverage the fact that the member doc was set with tasks:[] on creation.
-        // updateMemberTasks is not exported, so we re-set member via joinSession pattern.
-        // Easiest: call addTaskToSession for each task.
-        const { addTaskToSession } = await import('../services/sessionService');
+        // Host: add selected tasks to their already-active session
         for (const task of tasks) {
-          await addTaskToSession(sessionId!, user.uid, task);
+          await addTaskToSession(pending.sessionId, user.uid, task);
         }
-        setMode('hosting');
+        navigation.replace('Session', { sessionId: pending.sessionId });
       } else {
-        // Join the session with the chosen tasks
-        await joinSession(pending.sessionId, user.uid, displayName, tasks);
-        setSessionId(pending.sessionId);
-        setMode('joining');
+        // Joiner: send a join request and wait for host approval
+        const reqId = await requestToJoin(pending.sessionId, user.uid, displayName, tasks);
+        setJoinRequestId(reqId);
+        setJoinRequestSessionId(pending.sessionId);
+        setMode('waiting-approval');
       }
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Something went wrong.');
@@ -373,69 +394,84 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
-  function handleLeave() {
-    setSessionId(null);
-    setLiveSession(null);
-    setLiveMembers([]);
+  function handleWithdrawRequest() {
+    if (joinRequestId && joinRequestSessionId) {
+      import('../services/sessionService').then(({ denyJoinRequest }) => {
+        // Reuse deny to mark the request as denied (withdraw = self-deny)
+        // Actually just delete it
+      });
+      import('@react-native-firebase/firestore').then(m => {
+        m.default()
+          .collection('sessions')
+          .doc(joinRequestSessionId)
+          .collection('joinRequests')
+          .doc(joinRequestId)
+          .delete()
+          .catch(console.error);
+      });
+    }
+    setMode('pick');
+    setJoinRequestId(null);
+    setJoinRequestSessionId(null);
+  }
+
+  function handleBack() {
     setPending(null);
     setMode('pick');
   }
 
-  // ── Render: lobby ─────────────────────────────────────
-  if ((mode === 'hosting' || mode === 'joining') && liveSession && sessionId) {
+  // ── Render: waiting for host approval ─────────────────
+  if (mode === 'waiting-approval' && pending && pending.kind === 'join') {
+    const dotOpacity = dotAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
     return (
       <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Together</Text>
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>WAITING</Text>
-          </View>
-        </View>
-        <LobbyWaitingRoom
-          session={liveSession}
-          members={liveMembers}
-          isHost={liveSession.createdBy === user.uid}
-          onStart={() => startSession(sessionId, liveSession.durationMs)}
-          onLeave={handleLeave}
-        />
-      </SafeAreaView>
-    );
-  }
-
-  // ── Render: task selection ────────────────────────────
-  if (mode === 'task-selection') {
-    const subtitle = pending?.kind === 'join'
-      ? `${Math.round((pending.durationMs) / 60000)} min session`
-      : pending?.kind === 'create'
-        ? `${Math.round((pending.durationMs) / 60000)} min session`
-        : '';
-    return (
-      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={handleLeave}>
-            <Text style={styles.backBtnText}>← Back</Text>
-          </TouchableOpacity>
           <View style={styles.headerTitleGroup}>
             <Text style={styles.headerTitle}>Together</Text>
             <View style={styles.modeBadge}>
-              <Text style={styles.modeBadgeText}>{subtitle}</Text>
+              <Text style={styles.modeBadgeText}>WAITING</Text>
             </View>
           </View>
         </View>
-        <TaskSelection
-          activeTasks={activeTasks}
-          tasksLoading={tasksLoading}
-          selectedIds={selectedTaskIds}
-          onToggle={toggleTask}
-          onConfirm={handleConfirmTasks}
-          confirming={confirming}
-          now={now}
-        />
+        <View style={styles.waitingContainer}>
+          <View style={styles.waitingCard}>
+            <Animated.View style={[styles.waitingDot, { opacity: dotOpacity }]} />
+            <Text style={styles.waitingTitle}>
+              Waiting for {pending.hostUsername} to let you in…
+            </Text>
+            <Text style={styles.waitingSubtitle}>
+              They'll see a notification asking to approve your request.
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.withdrawBtn} onPress={handleWithdrawRequest}>
+            <Text style={styles.withdrawBtnText}>Cancel request</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
     );
   }
 
-  // ── Render: pick (create or join) ─────────────────────
+  // ── Render: task selection ─────────────────────────────
+  if (mode === 'task-selection' && pending) {
+    const subtitle = `${Math.round(pending.durationMs / 60000)} min session`;
+    return (
+      <TaskSelection
+        activeTasks={activeTasks}
+        tasksLoading={tasksLoading}
+        selectedIds={selectedTaskIds}
+        subtitle={subtitle}
+        onToggle={toggleTask}
+        onConfirm={handleConfirmTasks}
+        confirming={confirming}
+        onBack={handleBack}
+        now={now}
+      />
+    );
+  }
+
+  // ── Render: pick ──────────────────────────────────────
+  const partners = userProfile?.partners ?? [];
+
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
       <View style={styles.header}>
@@ -450,12 +486,28 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <View style={styles.content}>
-        {/* ── Host ── */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled">
+
+        {/* ── Your invite code ── */}
+        <View style={styles.yourCodeCard}>
+          <Text style={styles.yourCodeLabel}>YOUR INVITE CODE</Text>
+          <Text style={styles.yourCode}>
+            {userProfile?.personalInviteCode ?? '------'}
+          </Text>
+          <Text style={styles.yourCodeHint}>
+            Share this code so others can join your session.
+          </Text>
+        </View>
+
+        {/* ── Host a session ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Host a session</Text>
+          <Text style={styles.sectionTitle}>Start a session</Text>
           <Text style={styles.sectionSubtitle}>
-            Pick a duration, get a code, share it with your partner.
+            Pick a duration. Your session starts immediately.
           </Text>
           <View style={styles.presetRow}>
             {SESSION_DURATION_PRESETS.map(p => (
@@ -482,21 +534,21 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             disabled={loading}>
             {loading
               ? <ActivityIndicator color="#0d0d0d" />
-              : <Text style={styles.actionBtnText}>Create session</Text>}
+              : <Text style={styles.actionBtnText}>Start session</Text>}
           </TouchableOpacity>
         </View>
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or</Text>
+          <Text style={styles.dividerText}>or join</Text>
           <View style={styles.dividerLine} />
         </View>
 
-        {/* ── Join ── */}
+        {/* ── Join by code ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Join a session</Text>
+          <Text style={styles.sectionTitle}>Enter a code</Text>
           <Text style={styles.sectionSubtitle}>
-            Enter the 6-character code your partner shared.
+            Type your partner's 6-character invite code.
           </Text>
           <TextInput
             style={styles.codeInput}
@@ -521,7 +573,33 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             </Text>
           </TouchableOpacity>
         </View>
-      </View>
+
+        {/* ── Partner history ── */}
+        {partners.length > 0 && (
+          <>
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or pick someone</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Recent partners</Text>
+              <Text style={styles.sectionSubtitle}>
+                Tap to jump straight into their active session.
+              </Text>
+              {partners.map(p => (
+                <PartnerRow
+                  key={p.userId}
+                  partner={p}
+                  onJoin={() => handleJoinPartner(p)}
+                  joining={joiningPartnerId === p.userId}
+                />
+              ))}
+            </View>
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -575,14 +653,46 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
   },
 
-  // Pick (create / join)
-  content: {
-    flex: 1,
+  scroll: { flex: 1 },
+  scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingBottom: 40,
+    gap: 0,
   },
+
+  // Your invite code card
+  yourCodeCard: {
+    backgroundColor: '#13132a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    padding: 24,
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 28,
+  },
+  yourCodeLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 2,
+  },
+  yourCode: {
+    fontSize: 40,
+    fontWeight: '700',
+    color: '#f5f5f5',
+    letterSpacing: 8,
+    fontVariant: ['tabular-nums'],
+  },
+  yourCodeHint: {
+    fontSize: 13,
+    color: '#555',
+    marginTop: 2,
+  },
+
   section: {
     gap: 10,
+    marginBottom: 8,
   },
   sectionTitle: {
     color: '#f5f5f5',
@@ -645,7 +755,7 @@ const styles = StyleSheet.create({
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 28,
+    marginVertical: 24,
     gap: 12,
   },
   dividerLine: {
@@ -671,7 +781,93 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Task selection
+  // Partner history
+  partnerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    padding: 14,
+    gap: 12,
+  },
+  partnerInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  partnerName: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  partnerMeta: {
+    color: '#444',
+    fontSize: 12,
+  },
+  joinPartnerBtn: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  joinPartnerBtnDisabled: {
+    opacity: 0.5,
+  },
+  joinPartnerBtnText: {
+    color: '#6366f1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // Waiting for approval
+  waitingContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 40,
+    gap: 20,
+  },
+  waitingCard: {
+    backgroundColor: '#13132a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    padding: 28,
+    alignItems: 'center',
+    gap: 14,
+  },
+  waitingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6366f1',
+  },
+  waitingTitle: {
+    color: '#f5f5f5',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 26,
+  },
+  waitingSubtitle: {
+    color: '#555',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  withdrawBtn: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  withdrawBtnText: {
+    color: '#333',
+    fontSize: 14,
+  },
+
+  // Task selection (inline view)
   selectionContainer: {
     flex: 1,
     paddingHorizontal: 20,
@@ -769,117 +965,5 @@ const styles = StyleSheet.create({
     color: '#555',
     fontSize: 12,
     fontVariant: ['tabular-nums'],
-  },
-
-  // Lobby waiting room
-  lobbyContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-  },
-  lobbyCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    padding: 28,
-    alignItems: 'center',
-    gap: 8,
-  },
-  lobbyLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#555',
-    letterSpacing: 2,
-  },
-  inviteCode: {
-    fontSize: 42,
-    fontWeight: '700',
-    color: '#f5f5f5',
-    letterSpacing: 8,
-  },
-  lobbyMeta: {
-    fontSize: 13,
-    color: '#555',
-    marginTop: 4,
-  },
-  lobbyParticipants: {
-    marginTop: 24,
-    gap: 10,
-  },
-  lobbyParticipantsLabel: {
-    color: '#555',
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  participantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  participantDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#2e6b3e',
-  },
-  participantName: {
-    color: '#f5f5f5',
-    fontSize: 15,
-    fontWeight: '500',
-    flex: 1,
-  },
-  participantTaskCount: {
-    color: '#333',
-    fontSize: 12,
-  },
-  waitingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 4,
-  },
-  waitingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#6366f1',
-  },
-  waitingText: {
-    color: '#555',
-    fontSize: 14,
-  },
-  startBtn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 36,
-  },
-  startBtnDisabled: {
-    opacity: 0.3,
-  },
-  startBtnText: {
-    color: '#0d0d0d',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  guestWait: {
-    marginTop: 36,
-    alignItems: 'center',
-  },
-  guestWaitText: {
-    color: '#555',
-    fontSize: 14,
-  },
-  leaveBtn: {
-    marginTop: 16,
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  leaveBtnText: {
-    color: '#333',
-    fontSize: 14,
   },
 });

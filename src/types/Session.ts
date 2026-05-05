@@ -5,6 +5,7 @@ export type SessionTask = {
   title: string;
   createdAt: number;
   completedAt: number | null;
+  estimatedMs: number | null;
 };
 
 export const EXTEND_PRESETS: { label: string; ms: number }[] = [
@@ -57,3 +58,13 @@ export const SESSION_DURATION_PRESETS: { label: string; ms: number }[] = [
 
 export const MAX_SESSION_TASKS = 6;
 export const MAX_REACTIONS_PER_TASK = 3;
+
+export type JoinRequest = {
+  id: string;
+  sessionId: string;
+  userId: string;
+  displayName: string;
+  tasks: SessionTask[];
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: number;
+};

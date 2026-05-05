@@ -7,6 +7,7 @@ export type AuthStackParamList = {
 };
 
 export type AppStackParamList = {
+  UsernameSetup: undefined;
   Home: undefined;
   TogetherLobby: undefined;
   Session: { sessionId: string };
