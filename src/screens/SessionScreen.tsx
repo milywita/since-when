@@ -1,0 +1,1402 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  ScrollView,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSession } from '../hooks/useSession';
+import type { SessionMember, SessionTask, Reaction } from '../types/Session';
+import { REACTION_OPTIONS, MAX_SESSION_TASKS, EXTEND_PRESETS } from '../types/Session';
+import type { AppScreenProps } from '../navigation/types';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (days > 0) { return `${days}d ${hours}h ${mins}m`; }
+  if (hours > 0) { return `${hours}h ${mins}m ${secs}s`; }
+  if (mins > 0) { return `${mins}m ${secs}s`; }
+  return `${secs}s`;
+}
+
+function formatCountdown(ms: number): string {
+  if (ms <= 0) { return '0:00'; }
+  const totalSec = Math.ceil(ms / 1000);
+  const mins = Math.floor(totalSec / 60);
+  const secs = totalSec % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function useNow(intervalMs = 1000) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function useDoneFlash() {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const [message, setMessage] = useState('');
+  const flash = useCallback((msg: string) => {
+    setMessage(msg);
+    Animated.sequence([
+      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(2800),
+      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, [opacity]);
+  return { opacity, message, flash };
+}
+
+// ─── Pulsing dot for the active/focus indicator ───────────────────────────────
+
+function PulsingDot() {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(scale, { toValue: 1.5, duration: 700, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(scale, { toValue: 1, duration: 700, useNativeDriver: true }),
+          Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
+        ]),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [scale, opacity]);
+
+  return (
+    <Animated.View
+      style={[styles.pulsingDot, { transform: [{ scale }], opacity }]}
+    />
+  );
+}
+
+// ─── Add task modal ───────────────────────────────────────────────────────────
+
+type AddTaskModalProps = {
+  visible: boolean;
+  onClose: () => void;
+  onAdd: (title: string) => Promise<void>;
+  atLimit: boolean;
+};
+
+function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleAdd() {
+    const trimmed = text.trim();
+    if (!trimmed) { return; }
+    setSaving(true);
+    try {
+      await onAdd(trimmed);
+      setText('');
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleClose() {
+    setText('');
+    onClose();
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={handleClose} />
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          {atLimit ? (
+            <>
+              <Text style={styles.modalTitle}>Task limit reached</Text>
+              <Text style={styles.modalSubtitle}>
+                You can bring up to {MAX_SESSION_TASKS} tasks into a session.
+              </Text>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={handleClose}>
+                <Text style={styles.modalCloseBtnText}>Got it</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.modalTitle}>What are you working on?</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="e.g. Fix the login bug"
+                placeholderTextColor="#555"
+                value={text}
+                onChangeText={setText}
+                autoFocus
+                multiline
+                maxLength={120}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={handleAdd}
+              />
+              <TouchableOpacity
+                style={[styles.modalAddBtn, !text.trim() && styles.modalAddBtnDisabled]}
+                onPress={handleAdd}
+                disabled={!text.trim() || saving}>
+                {saving
+                  ? <ActivityIndicator color="#0d0d0d" />
+                  : <Text style={styles.modalAddBtnText}>Add to session</Text>}
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// ─── Reaction picker ──────────────────────────────────────────────────────────
+
+type ReactionPickerProps = {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (text: string) => Promise<void>;
+  canReact: boolean;
+  reactionCount: number;
+};
+
+function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }: ReactionPickerProps) {
+  const [sending, setSending] = useState(false);
+
+  async function handleSelect(text: string) {
+    setSending(true);
+    try {
+      await onSelect(text);
+      onClose();
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={onClose} />
+      <View style={styles.reactionSheet}>
+        {canReact ? (
+          <>
+            <Text style={styles.reactionTitle}>Send a reaction</Text>
+            <Text style={styles.reactionMeta}>{3 - reactionCount} left this task</Text>
+            <View style={styles.reactionOptions}>
+              {REACTION_OPTIONS.map(opt => (
+                <TouchableOpacity
+                  key={opt}
+                  style={styles.reactionBtn}
+                  onPress={() => handleSelect(opt)}
+                  disabled={sending}>
+                  <Text style={styles.reactionBtnText}>{opt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.reactionTitle}>Reaction limit</Text>
+            <Text style={styles.reactionMeta}>3 reactions per task per session.</Text>
+            <TouchableOpacity style={styles.reactionCloseBtn} onPress={onClose}>
+              <Text style={styles.reactionCloseBtnText}>OK</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Extend timer overlay ─────────────────────────────────────────────────────
+
+type ExtendOverlayProps = {
+  isHost: boolean;
+  hostName: string;
+  onExtend: (ms: number) => Promise<void>;
+  onEnd: () => Promise<void>;
+};
+
+function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps) {
+  const [busy, setBusy] = useState(false);
+
+  async function handleExtend(ms: number) {
+    setBusy(true);
+    try { await onExtend(ms); } finally { setBusy(false); }
+  }
+
+  async function handleEnd() {
+    setBusy(true);
+    try { await onEnd(); } finally { setBusy(false); }
+  }
+
+  return (
+    <View style={styles.extendOverlay}>
+      <View style={styles.extendCard}>
+        <Text style={styles.extendTitle}>Time's up.</Text>
+        {isHost ? (
+          <>
+            <Text style={styles.extendSubtitle}>
+              Keep going or call it done?
+            </Text>
+            <View style={styles.extendBtns}>
+              {EXTEND_PRESETS.map(p => (
+                <TouchableOpacity
+                  key={p.ms}
+                  style={[styles.extendChip, busy && styles.extendChipDisabled]}
+                  onPress={() => handleExtend(p.ms)}
+                  disabled={busy}>
+                  <Text style={styles.extendChipText}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={[styles.extendEndBtn, busy && styles.extendChipDisabled]}
+              onPress={() =>
+                Alert.alert(
+                  'End session?',
+                  'This will end the session for everyone.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'End', style: 'destructive', onPress: handleEnd },
+                  ],
+                )
+              }
+              disabled={busy}>
+              <Text style={styles.extendEndBtnText}>End session</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <Text style={styles.extendSubtitle}>
+            Waiting for {hostName} to extend or end the session…
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
+// ─── My task row ──────────────────────────────────────────────────────────────
+
+type MyTaskRowProps = {
+  task: SessionTask;
+  now: number;
+  isActive: boolean;
+  onComplete: () => void;
+  onSetActive: () => void;
+  onClearActive: () => void;
+};
+
+function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive }: MyTaskRowProps) {
+  const elapsed = now - task.createdAt;
+  const isOld = elapsed > 86400 * 1000;
+  const isDone = task.completedAt !== null;
+
+  if (isActive && !isDone) {
+    // Focus card — large, prominent
+    return (
+      <View style={styles.focusCard}>
+        <View style={styles.focusHeader}>
+          <PulsingDot />
+          <Text style={styles.focusLabel}>FOCUS</Text>
+        </View>
+        <Text style={styles.focusTitle}>{task.title}</Text>
+        <Text style={[styles.focusTimer, isOld && styles.focusTimerOld]}>
+          {formatElapsed(elapsed)}
+        </Text>
+        <View style={styles.focusActions}>
+          <TouchableOpacity style={styles.focusDoneBtn} onPress={onComplete}>
+            <Text style={styles.focusDoneBtnText}>Mark done</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.focusClearBtn} onPress={onClearActive}>
+            <Text style={styles.focusClearBtnText}>Clear focus</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.myTaskRow, isDone && styles.myTaskRowDone]}>
+      <TouchableOpacity
+        style={styles.activeDot}
+        onPress={isDone ? undefined : onSetActive}
+        hitSlop={8}>
+        <View style={styles.activeDotInner} />
+      </TouchableOpacity>
+      <View style={styles.myTaskInfo}>
+        <Text style={[styles.myTaskTitle, isDone && styles.myTaskTitleDone]} numberOfLines={2}>
+          {task.title}
+        </Text>
+        {!isDone && (
+          <Text style={[styles.myTaskTimer, isOld && styles.myTaskTimerOld]}>
+            {formatElapsed(elapsed)}
+          </Text>
+        )}
+        {isDone && (
+          <Text style={styles.myTaskDoneLabel}>
+            Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
+          </Text>
+        )}
+      </View>
+      {!isDone && (
+        <TouchableOpacity style={styles.myDoneBtn} onPress={onComplete} hitSlop={8}>
+          <Text style={styles.myDoneBtnText}>Done</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ─── Partner member card ──────────────────────────────────────────────────────
+
+type PartnerCardProps = {
+  member: SessionMember;
+  now: number;
+  recentReactions: Reaction[];
+  onReact: (taskId: string) => void;
+};
+
+function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps) {
+  const activeTask = member.tasks.find(t => t.taskId === member.activeTaskId && !t.completedAt);
+  const otherTasks = member.tasks.filter(t => t.taskId !== member.activeTaskId);
+
+  return (
+    <View style={styles.partnerCard}>
+      <View style={styles.partnerHeader}>
+        <View style={styles.partnerOnlineDot} />
+        <Text style={styles.partnerName}>{member.displayName}</Text>
+        <Text style={styles.partnerTaskCount}>
+          {member.tasks.filter(t => !t.completedAt).length} active
+        </Text>
+      </View>
+
+      {member.tasks.length === 0 && (
+        <Text style={styles.partnerEmpty}>No tasks added yet.</Text>
+      )}
+
+      {/* Active/focus task shown first and highlighted */}
+      {activeTask && (
+        <View style={styles.partnerFocusTask}>
+          <View style={styles.partnerFocusHeader}>
+            <PulsingDot />
+            <Text style={styles.partnerFocusLabel}>FOCUS</Text>
+          </View>
+          <Text style={styles.partnerFocusTitle} numberOfLines={2}>{activeTask.title}</Text>
+          <View style={styles.partnerFocusMeta}>
+            <Text style={[
+              styles.partnerFocusTimer,
+              now - activeTask.createdAt > 86400 * 1000 && styles.partnerTaskTimerOld,
+            ]}>
+              {formatElapsed(now - activeTask.createdAt)}
+            </Text>
+            <TouchableOpacity
+              style={styles.reactBtnFocus}
+              onPress={() => onReact(activeTask.taskId)}
+              hitSlop={8}>
+              <Text style={styles.reactBtnFocusText}>React</Text>
+            </TouchableOpacity>
+          </View>
+          {recentReactions.find(r => r.taskId === activeTask.taskId) && (
+            <Text style={styles.partnerReactionBubble}>
+              "{recentReactions.find(r => r.taskId === activeTask.taskId)!.text}"
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Remaining tasks */}
+      {otherTasks.map(task => {
+        const elapsed = now - task.createdAt;
+        const isDone = task.completedAt !== null;
+        const latestReaction = recentReactions.find(r => r.taskId === task.taskId);
+
+        return (
+          <View key={task.taskId} style={[styles.partnerTask, isDone && styles.partnerTaskDone]}>
+            <View style={styles.partnerTaskLeft}>
+              <Text
+                style={[styles.partnerTaskTitle, isDone && styles.partnerTaskTitleDone]}
+                numberOfLines={2}>
+                {task.title}
+              </Text>
+              {!isDone && (
+                <Text style={[styles.partnerTaskTimer, elapsed > 86400 * 1000 && styles.partnerTaskTimerOld]}>
+                  {formatElapsed(elapsed)}
+                </Text>
+              )}
+              {isDone && (
+                <Text style={styles.partnerTaskDoneLabel}>
+                  Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
+                </Text>
+              )}
+              {latestReaction && (
+                <Text style={styles.partnerReactionBubble}>"{latestReaction.text}"</Text>
+              )}
+            </View>
+            {!isDone && (
+              <TouchableOpacity
+                style={styles.reactBtn}
+                onPress={() => onReact(task.taskId)}
+                hitSlop={8}>
+                <Text style={styles.reactBtnText}>React</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ─── Session ended overlay ────────────────────────────────────────────────────
+
+type EndedOverlayProps = {
+  onBack: () => void;
+  myMember: SessionMember | null;
+};
+
+function EndedOverlay({ onBack, myMember }: EndedOverlayProps) {
+  const completed = myMember?.tasks.filter(t => t.completedAt !== null) ?? [];
+  const total = myMember?.tasks.length ?? 0;
+  return (
+    <View style={styles.endedOverlay}>
+      <Text style={styles.endedTitle}>Session over.</Text>
+      <Text style={styles.endedSubtitle}>
+        {completed.length > 0
+          ? `You completed ${completed.length} of ${total} task${total !== 1 ? 's' : ''}.`
+          : 'No tasks completed this session. Remaining ones are still in Solo.'}
+      </Text>
+      {completed.map(t => (
+        <View key={t.taskId} style={styles.endedTask}>
+          <Text style={styles.endedTaskMark}>✓</Text>
+          <Text style={styles.endedTaskTitle}>{t.title}</Text>
+        </View>
+      ))}
+      <TouchableOpacity style={styles.endedBackBtn} onPress={onBack}>
+        <Text style={styles.endedBackBtnText}>Back to Solo</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
+
+type Props = AppScreenProps<'Session'>;
+
+export default function SessionScreen({ route, navigation }: Props) {
+  const { sessionId } = route.params;
+  const {
+    session,
+    myMember,
+    otherMembers,
+    members,
+    reactions,
+    loading,
+    error,
+    userId,
+    isHost,
+    canReact,
+    myReactionCountForTask,
+    endSession,
+    extendSession,
+    addTask,
+    completeTask,
+    setActiveTask,
+    sendReaction,
+  } = useSession(sessionId);
+
+  const now = useNow();
+  const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [reactionTarget, setReactionTarget] = useState<{ toUserId: string; taskId: string } | null>(null);
+
+  const myActiveTasks = myMember?.tasks.filter(t => t.completedAt === null) ?? [];
+  const atLimit = (myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS;
+
+  const timeLeft = session?.endsAt ? Math.max(0, session.endsAt - now) : null;
+  const timerExpired = timeLeft !== null && timeLeft <= 0 && session?.status === 'active';
+  const sessionEnded = session?.status === 'ended';
+
+  // Host name for the extend overlay non-host message
+  const hostMember = members.find(m => m.userId === session?.createdBy);
+  const hostName = hostMember?.displayName ?? 'the host';
+
+  async function handleAddTask(title: string) {
+    const newTask: SessionTask = {
+      taskId: `${userId}-${Date.now()}`,
+      title,
+      createdAt: Date.now(),
+      completedAt: null,
+    };
+    await addTask(newTask);
+  }
+
+  async function handleCompleteTask(task: SessionTask) {
+    await completeTask(task);
+    flash(`You did it. "${task.title}" — gone.`);
+  }
+
+  function handleSetActive(taskId: string) {
+    const current = myMember?.activeTaskId;
+    setActiveTask(current === taskId ? null : taskId).catch(console.error);
+  }
+
+  async function handleSendReaction(text: string) {
+    if (!reactionTarget) { return; }
+    await sendReaction(reactionTarget.toUserId, reactionTarget.taskId, text);
+    flash(`Sent: "${text}"`);
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.loadingRoot}>
+        <ActivityIndicator size="large" color="#f5f5f5" />
+      </View>
+    );
+  }
+
+  if (error || !session) {
+    return (
+      <View style={styles.loadingRoot}>
+        <Text style={styles.errorText}>{error ?? 'Session not found.'}</Text>
+        <TouchableOpacity style={styles.errorBackBtn} onPress={() => navigation.popToTop()}>
+          <Text style={styles.errorBackBtnText}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (sessionEnded) {
+    return (
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+        <EndedOverlay myMember={myMember} onBack={() => navigation.popToTop()} />
+      </SafeAreaView>
+    );
+  }
+
+  const isTimerWarning = timeLeft !== null && timeLeft < 5 * 60 * 1000 && !timerExpired;
+
+  return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      {/* Flash banner */}
+      <Animated.View style={[styles.flashBanner, { opacity: flashOpacity }]} pointerEvents="none">
+        <Text style={styles.flashText}>{flashMessage}</Text>
+      </Animated.View>
+
+      {/* Header */}
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>Since When</Text>
+          <View style={styles.modeBadge}>
+            <Text style={styles.modeBadgeText}>TOGETHER</Text>
+          </View>
+        </View>
+        <View style={styles.headerRight}>
+          {timeLeft !== null && (
+            <Text style={[
+              styles.countdown,
+              isTimerWarning && styles.countdownWarning,
+              timerExpired && styles.countdownExpired,
+            ]}>
+              {timerExpired ? 'Time up' : formatCountdown(timeLeft)}
+            </Text>
+          )}
+          {isHost && !timerExpired && (
+            <TouchableOpacity
+              style={styles.endBtn}
+              onPress={() =>
+                Alert.alert('End session?', 'This will end the session for everyone.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'End', style: 'destructive', onPress: () => endSession() },
+                ])
+              }>
+              <Text style={styles.endBtnText}>End</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Time-expired overlay — sits over the rest of the screen */}
+      {timerExpired && (
+        <ExtendOverlay
+          isHost={isHost}
+          hostName={hostName}
+          onExtend={extendSession}
+          onEnd={endSession}
+        />
+      )}
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}>
+
+        {/* My tasks */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your tasks</Text>
+            <Text style={styles.sectionMeta}>{myMember?.tasks.length ?? 0}/{MAX_SESSION_TASKS}</Text>
+          </View>
+
+          {(myMember?.tasks.length ?? 0) === 0 && (
+            <Text style={styles.emptyMy}>Add tasks you're working on this session.</Text>
+          )}
+
+          {myMember?.tasks.map(task => (
+            <MyTaskRow
+              key={task.taskId}
+              task={task}
+              now={now}
+              isActive={myMember.activeTaskId === task.taskId}
+              onComplete={() => handleCompleteTask(task)}
+              onSetActive={() => handleSetActive(task.taskId)}
+              onClearActive={() => setActiveTask(null)}
+            />
+          ))}
+
+          {!atLimit && (
+            <TouchableOpacity
+              style={styles.addTaskBtn}
+              onPress={() => setAddModalVisible(true)}>
+              <Text style={styles.addTaskBtnText}>+ Add task</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Active task hint when nothing is focused yet */}
+        {myActiveTasks.length > 0 && myMember?.activeTaskId === null && (
+          <View style={styles.focusHint}>
+            <Text style={styles.focusHintText}>
+              Tap the dot next to a task to set your focus. Your partner can see what you're working on.
+            </Text>
+          </View>
+        )}
+
+        {/* Partner tasks */}
+        {otherMembers.length === 0 && (
+          <View style={styles.section}>
+            <Text style={styles.waitingPartner}>Waiting for your partner to join…</Text>
+          </View>
+        )}
+
+        {otherMembers.map(member => (
+          <View key={member.userId} style={styles.section}>
+            <PartnerCard
+              member={member}
+              now={now}
+              recentReactions={reactions.filter(r => r.toUserId === member.userId)}
+              onReact={taskId => setReactionTarget({ toUserId: member.userId, taskId })}
+            />
+          </View>
+        ))}
+      </ScrollView>
+
+      {/* Modals */}
+      <AddTaskModal
+        visible={addModalVisible}
+        onClose={() => setAddModalVisible(false)}
+        onAdd={handleAddTask}
+        atLimit={atLimit}
+      />
+
+      {reactionTarget !== null && (
+        <ReactionPicker
+          visible
+          onClose={() => setReactionTarget(null)}
+          onSelect={handleSendReaction}
+          canReact={canReact(reactionTarget.taskId)}
+          reactionCount={myReactionCountForTask(reactionTarget.taskId)}
+        />
+      )}
+    </SafeAreaView>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#0d0d0d',
+  },
+  loadingRoot: {
+    flex: 1,
+    backgroundColor: '#0d0d0d',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    gap: 16,
+  },
+  errorText: {
+    color: '#c0392b',
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  errorBackBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  errorBackBtnText: {
+    color: '#555',
+    fontSize: 14,
+  },
+
+  // Flash
+  flashBanner: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    right: 20,
+    zIndex: 100,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  flashText: {
+    color: '#f5f5f5',
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#f5f5f5',
+    letterSpacing: -0.5,
+  },
+  modeBadge: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  modeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 1.5,
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 4,
+  },
+  countdown: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#f5f5f5',
+    fontVariant: ['tabular-nums'],
+  },
+  countdownWarning: {
+    color: '#c0392b',
+  },
+  countdownExpired: {
+    color: '#555',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  endBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  endBtnText: {
+    color: '#555',
+    fontSize: 13,
+  },
+
+  // Scroll
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 60,
+    gap: 24,
+    paddingTop: 8,
+  },
+
+  // Sections
+  section: {},
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    color: '#f5f5f5',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sectionMeta: {
+    color: '#333',
+    fontSize: 12,
+  },
+  emptyMy: {
+    color: '#333',
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  waitingPartner: {
+    color: '#333',
+    fontSize: 14,
+  },
+
+  // Focus hint
+  focusHint: {
+    backgroundColor: '#13132a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  focusHintText: {
+    color: '#6366f1',
+    fontSize: 13,
+    lineHeight: 18,
+    opacity: 0.8,
+  },
+
+  // Pulsing dot
+  pulsingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#6366f1',
+  },
+
+  // Focus card (my active task, prominent)
+  focusCard: {
+    backgroundColor: '#13132a',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#6366f1',
+    padding: 18,
+    marginBottom: 8,
+    gap: 6,
+  },
+  focusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginBottom: 2,
+  },
+  focusLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 2,
+  },
+  focusTitle: {
+    color: '#f5f5f5',
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 26,
+  },
+  focusTimer: {
+    color: '#8b8cf4',
+    fontSize: 16,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+    marginBottom: 4,
+  },
+  focusTimerOld: {
+    color: '#c0392b',
+  },
+  focusActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  focusDoneBtn: {
+    flex: 1,
+    backgroundColor: '#6366f1',
+    borderRadius: 9,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  focusDoneBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  focusClearBtn: {
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+  },
+  focusClearBtnText: {
+    color: '#555',
+    fontSize: 14,
+  },
+
+  // Regular my-task row
+  myTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    padding: 12,
+    marginBottom: 8,
+    gap: 10,
+  },
+  myTaskRowDone: { opacity: 0.45 },
+  activeDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activeDotInner: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2a2a2a',
+  },
+  myTaskInfo: { flex: 1, gap: 2 },
+  myTaskTitle: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  myTaskTitleDone: {
+    textDecorationLine: 'line-through',
+    color: '#555',
+  },
+  myTaskTimer: {
+    color: '#888',
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  myTaskTimerOld: { color: '#c0392b' },
+  myTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
+  myDoneBtn: {
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  myDoneBtnText: {
+    color: '#f5f5f5',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  addTaskBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    borderStyle: 'dashed',
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  addTaskBtnText: { color: '#444', fontSize: 14 },
+
+  // Partner card
+  partnerCard: {
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+    padding: 14,
+    gap: 8,
+  },
+  partnerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  partnerOnlineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#2e6b3e',
+  },
+  partnerName: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '600',
+    flex: 1,
+  },
+  partnerTaskCount: { color: '#333', fontSize: 12 },
+  partnerEmpty: { color: '#333', fontSize: 13 },
+
+  // Partner focus task
+  partnerFocusTask: {
+    backgroundColor: '#13132a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    padding: 12,
+    gap: 4,
+  },
+  partnerFocusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  partnerFocusLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 1.5,
+  },
+  partnerFocusTitle: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  partnerFocusMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  partnerFocusTimer: {
+    color: '#8b8cf4',
+    fontSize: 13,
+    fontVariant: ['tabular-nums'],
+  },
+  reactBtnFocus: {
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  reactBtnFocusText: { color: '#6366f1', fontSize: 12 },
+
+  // Partner regular task
+  partnerTask: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderRadius: 8,
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#222',
+    padding: 10,
+    gap: 8,
+  },
+  partnerTaskDone: { opacity: 0.4 },
+  partnerTaskLeft: { flex: 1, gap: 3 },
+  partnerTaskTitle: {
+    color: '#f5f5f5',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  partnerTaskTitleDone: {
+    textDecorationLine: 'line-through',
+    color: '#444',
+  },
+  partnerTaskTimer: {
+    color: '#666',
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  partnerTaskTimerOld: { color: '#8b2e2e' },
+  partnerTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
+  partnerReactionBubble: {
+    color: '#6366f1',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  reactBtn: {
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginTop: 2,
+  },
+  reactBtnText: { color: '#555', fontSize: 12 },
+
+  // Extend overlay
+  extendOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.82)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 50,
+    paddingHorizontal: 28,
+  },
+  extendCard: {
+    width: '100%',
+    backgroundColor: '#141414',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    padding: 28,
+    gap: 12,
+  },
+  extendTitle: {
+    color: '#f5f5f5',
+    fontSize: 26,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+  extendSubtitle: {
+    color: '#555',
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  extendBtns: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  extendChip: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6366f1',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  extendChipDisabled: { opacity: 0.4 },
+  extendChipText: {
+    color: '#6366f1',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  extendEndBtn: {
+    backgroundColor: 'transparent',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  extendEndBtnText: {
+    color: '#555',
+    fontSize: 14,
+  },
+
+  // Add task modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+  },
+  modalSheet: {
+    backgroundColor: '#141414',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+    paddingTop: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: '#333',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    color: '#f5f5f5',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+  },
+  modalSubtitle: {
+    color: '#555',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  modalInput: {
+    backgroundColor: '#1a1a1a',
+    color: '#f5f5f5',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    marginBottom: 16,
+    minHeight: 52,
+  },
+  modalAddBtn: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  modalAddBtnDisabled: { opacity: 0.3 },
+  modalAddBtnText: {
+    color: '#0d0d0d',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalCloseBtn: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  modalCloseBtnText: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+
+  // Reaction picker
+  reactionSheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#141414',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 44 : 28,
+    paddingTop: 24,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    gap: 10,
+  },
+  reactionTitle: {
+    color: '#f5f5f5',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  reactionMeta: { color: '#555', fontSize: 13, marginBottom: 4 },
+  reactionOptions: { gap: 8 },
+  reactionBtn: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  reactionBtnText: {
+    color: '#f5f5f5',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  reactionCloseBtn: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  reactionCloseBtnText: { color: '#555', fontSize: 14 },
+
+  // Session ended
+  endedOverlay: {
+    flex: 1,
+    paddingHorizontal: 28,
+    paddingTop: 60,
+    gap: 12,
+  },
+  endedTitle: {
+    color: '#f5f5f5',
+    fontSize: 32,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+  endedSubtitle: {
+    color: '#555',
+    fontSize: 16,
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+  endedTask: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  endedTaskMark: {
+    color: '#2e6b3e',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  endedTaskTitle: { color: '#888', fontSize: 14, flex: 1 },
+  endedBackBtn: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 32,
+  },
+  endedBackBtnText: {
+    color: '#0d0d0d',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});

@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import { useTasks } from '../hooks/useTasks';
 import type { Task } from '../types/Task';
+import type { AppScreenProps } from '../navigation/types';
 
 // ─── Elapsed time helpers ────────────────────────────────────────────────────
 
@@ -235,7 +236,9 @@ function useDoneFlash() {
 
 type ActiveTab = 'active' | 'history';
 
-export default function HomeScreen() {
+type Props = AppScreenProps<'Home'>;
+
+export default function HomeScreen({ navigation }: Props) {
   const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask } = useTasks();
   const [modalVisible, setModalVisible] = useState(false);
   const [tab, setTab] = useState<ActiveTab>('active');
@@ -288,6 +291,18 @@ export default function HomeScreen() {
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── Together banner ──────────────────────────── */}
+      <TouchableOpacity
+        style={styles.togetherBanner}
+        onPress={() => navigation.navigate('TogetherLobby')}
+        activeOpacity={0.75}>
+        <View style={styles.togetherBannerLeft}>
+          <Text style={styles.togetherBannerLabel}>TOGETHER</Text>
+          <Text style={styles.togetherBannerText}>Work with someone</Text>
+        </View>
+        <Text style={styles.togetherBannerArrow}>›</Text>
+      </TouchableOpacity>
 
       {/* ── Tabs ─────────────────────────────────────── */}
       <View style={styles.tabs}>
@@ -462,6 +477,40 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#555',
     fontSize: 13,
+  },
+
+  // Together banner
+  togetherBanner: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: '#13132a',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2a2a4a',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  togetherBannerLeft: {
+    gap: 2,
+  },
+  togetherBannerLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#6366f1',
+    letterSpacing: 2,
+  },
+  togetherBannerText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#c7c8ff',
+  },
+  togetherBannerArrow: {
+    fontSize: 20,
+    color: '#6366f1',
+    fontWeight: '300',
   },
 
   // Tabs
@@ -640,7 +689,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   modalSheet: {
