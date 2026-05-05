@@ -1,4 +1,4 @@
-package com.sincewhen
+package com.hackathon.sincewhen
 
 import android.app.Application
 import com.facebook.react.PackageList

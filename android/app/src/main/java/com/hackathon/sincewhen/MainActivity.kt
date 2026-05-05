@@ -1,4 +1,4 @@
-package com.sincewhen
+package com.hackathon.sincewhen
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
