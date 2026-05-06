@@ -22,6 +22,8 @@ import { SwipeableRow } from '../components/SwipeableRow';
 import type { Task } from '../types/Task';
 import type { SessionHistoryRecord } from '../types/Session';
 import type { AppScreenProps } from '../navigation/types';
+import { subscribeToUserProfile, setActiveSession } from '../services/userService';
+import { getSessionOnce } from '../services/sessionService';
 
 // ─── Elapsed time helpers ────────────────────────────────────────────────────
 
@@ -64,9 +66,10 @@ type TaskCardProps = {
   task: Task;
   now: number;
   onComplete: () => void;
+  onEdit: () => void;
 };
 
-function TaskCard({ task, now, onComplete }: TaskCardProps) {
+function TaskCard({ task, now, onComplete, onEdit }: TaskCardProps) {
   const elapsed = now - task.createdAt;
   const overEstimate = task.estimatedMs !== null && elapsed > task.estimatedMs;
   const isOld = elapsed > 86400 * 1000;
@@ -89,9 +92,14 @@ function TaskCard({ task, now, onComplete }: TaskCardProps) {
           )}
         </View>
       </View>
-      <TouchableOpacity style={styles.doneBtn} onPress={onComplete} hitSlop={12}>
-        <Text style={styles.doneBtnText}>Done</Text>
-      </TouchableOpacity>
+      <View style={styles.cardActions}>
+        <TouchableOpacity style={styles.editBtn} onPress={onEdit} hitSlop={12}>
+          <Text style={styles.editBtnText}>✎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.doneBtn} onPress={onComplete} hitSlop={12}>
+          <Text style={styles.doneBtnText}>Done</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -441,6 +449,92 @@ function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
   );
 }
 
+// ─── Edit task modal ──────────────────────────────────────────────────────────
+
+type EditTaskModalProps = {
+  task: Task | null;
+  onClose: () => void;
+  onSave: (taskId: string, title: string, estimatedMs: number | null) => Promise<void>;
+};
+
+function EditTaskModal({ task, onClose, onSave }: EditTaskModalProps) {
+  const [text, setText] = useState('');
+  const [selectedMs, setSelectedMs] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (task) {
+      setText(task.title);
+      setSelectedMs(task.estimatedMs);
+    }
+  }, [task]);
+
+  async function handleSave() {
+    const trimmed = text.trim();
+    if (!trimmed || !task) { return; }
+    setSaving(true);
+    try {
+      await onSave(task.id, trimmed, selectedMs);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleClose() {
+    onClose();
+  }
+
+  return (
+    <Modal visible={task !== null} transparent animationType="slide" onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={handleClose} />
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Edit task</Text>
+          <TextInput
+            style={styles.modalInput}
+            placeholderTextColor="#555"
+            value={text}
+            onChangeText={setText}
+            autoFocus
+            multiline
+            maxLength={120}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={handleSave}
+          />
+
+          <Text style={styles.estimateLabel}>How long will it actually take?</Text>
+          <View style={styles.presetRow}>
+            {TIME_PRESETS.map(p => (
+              <TouchableOpacity
+                key={p.ms}
+                style={[styles.presetChip, selectedMs === p.ms && styles.presetChipSelected]}
+                onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
+                <Text style={[styles.presetChipText, selectedMs === p.ms && styles.presetChipTextSelected]}>
+                  {p.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.modalAddBtn, !text.trim() && styles.modalAddBtnDisabled]}
+            onPress={handleSave}
+            disabled={!text.trim() || saving}>
+            {saving
+              ? <ActivityIndicator color="#0d0d0d" />
+              : <Text style={styles.modalAddBtnText}>Save changes</Text>}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
 // ─── Flash banner (confetti substitute) ──────────────────────────────────────
 
 function useDoneFlash() {
@@ -466,12 +560,39 @@ type ActiveTab = 'active' | 'history';
 type Props = AppScreenProps<'Home'>;
 
 export default function HomeScreen({ navigation }: Props) {
-  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask } = useTasks();
+  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [tab, setTab] = useState<ActiveTab>('active');
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
+
+  const [rejoinSessionId, setRejoinSessionId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const uid = auth().currentUser?.uid;
+    if (!uid) { return; }
+    const unsub = subscribeToUserProfile(uid, async profile => {
+      const sid = profile.activeSessionId;
+      if (!sid) {
+        setRejoinSessionId(null);
+        return;
+      }
+      try {
+        const session = await getSessionOnce(sid);
+        if (session?.status === 'active') {
+          setRejoinSessionId(sid);
+        } else {
+          setRejoinSessionId(null);
+          await setActiveSession(uid, null);
+        }
+      } catch {
+        setRejoinSessionId(null);
+      }
+    });
+    return unsub;
+  }, []);
 
   const historySections = useMemo(
     () => buildHistorySections(completedTasks, sessionHistory),
@@ -501,6 +622,10 @@ export default function HomeScreen({ navigation }: Props) {
 
   async function handleDelete(task: Task) {
     await deleteTask(task.id);
+  }
+
+  async function handleEdit(taskId: string, title: string, estimatedMs: number | null) {
+    await updateTask(taskId, { title, estimatedMs });
   }
 
   if (loading) {
@@ -539,6 +664,23 @@ export default function HomeScreen({ navigation }: Props) {
           <Text style={styles.signOutText}>Sign out</Text>
         </TouchableOpacity>
       </View>
+
+      {/* ── Rejoin active session banner ─────────────── */}
+      {rejoinSessionId !== null && (
+        <TouchableOpacity
+          style={styles.rejoinBanner}
+          onPress={() => navigation.navigate('Session', { sessionId: rejoinSessionId! })}
+          activeOpacity={0.75}>
+          <View style={styles.rejoinBannerLeft}>
+            <View style={styles.rejoinDot} />
+            <View>
+              <Text style={styles.rejoinBannerLabel}>ACTIVE SESSION</Text>
+              <Text style={styles.rejoinBannerText}>Tap to rejoin your Together session</Text>
+            </View>
+          </View>
+          <Text style={styles.rejoinBannerArrow}>›</Text>
+        </TouchableOpacity>
+      )}
 
       {/* ── Together banner ──────────────────────────── */}
       <TouchableOpacity
@@ -592,6 +734,7 @@ export default function HomeScreen({ navigation }: Props) {
                     task={item}
                     now={now}
                     onComplete={() => handleComplete(item)}
+                    onEdit={() => setEditingTask(item)}
                   />
                 </SwipeableRow>
               )}
@@ -681,6 +824,12 @@ export default function HomeScreen({ navigation }: Props) {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         onAdd={(title, estimatedMs) => addTask(title, estimatedMs)}
+      />
+
+      <EditTaskModal
+        task={editingTask}
+        onClose={() => setEditingTask(null)}
+        onSave={handleEdit}
       />
     </SafeAreaView>
   );
@@ -774,6 +923,49 @@ const styles = StyleSheet.create({
   signOutText: {
     color: '#555',
     fontSize: 13,
+  },
+
+  // Rejoin active session banner
+  rejoinBanner: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    backgroundColor: '#0d1f0d',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1e4d1e',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  rejoinBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rejoinDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4ade80',
+  },
+  rejoinBannerLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#4ade80',
+    letterSpacing: 2,
+    marginBottom: 2,
+  },
+  rejoinBannerText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#a7f3c0',
+  },
+  rejoinBannerArrow: {
+    fontSize: 20,
+    color: '#4ade80',
+    fontWeight: '300',
   },
 
   // Together banner
@@ -887,6 +1079,22 @@ const styles = StyleSheet.create({
     color: '#8b2e2e',
   },
 
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editBtn: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
+  editBtnText: {
+    color: '#666',
+    fontSize: 15,
+  },
   doneBtn: {
     borderRadius: 8,
     borderWidth: 1,

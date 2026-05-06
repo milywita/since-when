@@ -67,6 +67,14 @@ export async function completeTask(
   });
 }
 
+export async function updateTask(
+  userId: string,
+  taskId: string,
+  changes: { title?: string; estimatedMs?: number | null },
+): Promise<void> {
+  await tasksCollection(userId).doc(taskId).update(changes);
+}
+
 export async function deleteTask(userId: string, taskId: string): Promise<void> {
   await tasksCollection(userId).doc(taskId).delete();
 }

@@ -351,6 +351,16 @@ export async function sendReaction(
 
 // ─── Real-time subscriptions ──────────────────────────────────────────────────
 
+/**
+ * One-shot fetch of a session's current status.
+ * Returns null if the document does not exist.
+ */
+export async function getSessionOnce(sessionId: string): Promise<Session | null> {
+  const doc = await sessionsCol().doc(sessionId).get();
+  if (!doc.exists) { return null; }
+  return doc.data() as Session;
+}
+
 export function subscribeToSession(
   sessionId: string,
   onUpdate: (session: Session) => void,
