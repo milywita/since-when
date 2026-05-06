@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import { useSession } from '../hooks/useSession';
+import { SwipeableRow } from '../components/SwipeableRow';
 import { subscribeToUserProfile } from '../services/userService';
 import {
   subscribeToJoinRequests,
@@ -24,9 +25,16 @@ import {
   denyJoinRequest,
 } from '../services/sessionService';
 import type { SessionMember, SessionTask, Reaction, JoinRequest } from '../types/Session';
-import { REACTION_OPTIONS, MAX_SESSION_TASKS, EXTEND_PRESETS } from '../types/Session';
+import { REACTION_OPTIONS_ACTIVE, REACTION_OPTIONS_COMPLETED, EXTEND_PRESETS } from '../types/Session';
 import type { UserProfile } from '../types/User';
 import type { AppScreenProps } from '../navigation/types';
+import {
+  requestNotificationPermissions,
+  ensureNotificationChannel,
+  scheduleSessionTimerNotification,
+  cancelSessionTimerNotification,
+  showSessionTimerNotificationNow,
+} from '../services/notificationService';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +79,49 @@ function useDoneFlash() {
     ]).start();
   }, [opacity]);
   return { opacity, message, flash };
+}
+
+function formatRelativeTime(ts: number, now: number): string {
+  const secs = Math.floor((now - ts) / 1000);
+  if (secs < 60) { return 'just now'; }
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) { return `${mins}m ago`; }
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) { return `${hours}h ago`; }
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+// ─── Expandable per-task reaction list ───────────────────────────────────────
+
+type TaskReactionsProps = { reactions: Reaction[]; now: number };
+
+function TaskReactions({ reactions, now }: TaskReactionsProps) {
+  const [expanded, setExpanded] = useState(false);
+  if (reactions.length === 0) { return null; }
+  const sorted = [...reactions].sort((a, b) => b.sentAt - a.sentAt);
+  return (
+    <View style={styles.taskReactions}>
+      <TouchableOpacity
+        style={styles.taskReactionsToggle}
+        onPress={() => setExpanded(e => !e)}
+        hitSlop={8}>
+        <Text style={styles.taskReactionsCount}>
+          {reactions.length} {reactions.length === 1 ? 'reaction' : 'reactions'}{' '}
+          <Text style={styles.taskReactionsChevron}>{expanded ? '▲' : '▼'}</Text>
+        </Text>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={styles.taskReactionsList}>
+          {sorted.map(r => (
+            <View key={r.id} style={styles.taskReactionItem}>
+              <Text style={styles.taskReactionText}>"{r.text}"</Text>
+              <Text style={styles.taskReactionTime}>{formatRelativeTime(r.sentAt, now)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
 }
 
 // ─── Pulsing dot for the active/focus indicator ───────────────────────────────
@@ -120,10 +171,9 @@ type AddTaskModalProps = {
   visible: boolean;
   onClose: () => void;
   onAdd: (title: string, estimatedMs: number | null) => Promise<void>;
-  atLimit: boolean;
 };
 
-function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
+function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -156,61 +206,47 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
         <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={handleClose} />
         <View style={styles.modalSheet}>
           <View style={styles.modalHandle} />
-          {atLimit ? (
-            <>
-              <Text style={styles.modalTitle}>Task limit reached</Text>
-              <Text style={styles.modalSubtitle}>
-                You can bring up to {MAX_SESSION_TASKS} tasks into a session.
-              </Text>
-              <TouchableOpacity style={styles.modalCloseBtn} onPress={handleClose}>
-                <Text style={styles.modalCloseBtnText}>Got it</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={styles.modalTitle}>What are you working on?</Text>
-              <TextInput
-                style={styles.modalInput}
-                placeholder="e.g. Fix the login bug"
-                placeholderTextColor="#555"
-                value={text}
-                onChangeText={setText}
-                autoFocus
-                multiline
-                maxLength={120}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={handleAdd}
-              />
-              <Text style={styles.estimateLabel}>How long will it take?</Text>
-              <View style={styles.estimateRow}>
-                {SESSION_TIME_PRESETS.map(p => (
-                  <TouchableOpacity
-                    key={p.ms}
-                    style={[
-                      styles.estimateChip,
-                      selectedMs === p.ms && styles.estimateChipSelected,
-                    ]}
-                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
-                    <Text style={[
-                      styles.estimateChipText,
-                      selectedMs === p.ms && styles.estimateChipTextSelected,
-                    ]}>
-                      {p.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+          <Text style={styles.modalTitle}>What are you working on?</Text>
+          <TextInput
+            style={styles.modalInput}
+            placeholder="e.g. Fix the login bug"
+            placeholderTextColor="#555"
+            value={text}
+            onChangeText={setText}
+            autoFocus
+            multiline
+            maxLength={120}
+            returnKeyType="done"
+            blurOnSubmit
+            onSubmitEditing={handleAdd}
+          />
+          <Text style={styles.estimateLabel}>How long will it take?</Text>
+          <View style={styles.estimateRow}>
+            {SESSION_TIME_PRESETS.map(p => (
               <TouchableOpacity
-                style={[styles.modalAddBtn, !text.trim() && styles.modalAddBtnDisabled]}
-                onPress={handleAdd}
-                disabled={!text.trim() || saving}>
-                {saving
-                  ? <ActivityIndicator color="#0d0d0d" />
-                  : <Text style={styles.modalAddBtnText}>Add to session</Text>}
+                key={p.ms}
+                style={[
+                  styles.estimateChip,
+                  selectedMs === p.ms && styles.estimateChipSelected,
+                ]}
+                onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
+                <Text style={[
+                  styles.estimateChipText,
+                  selectedMs === p.ms && styles.estimateChipTextSelected,
+                ]}>
+                  {p.label}
+                </Text>
               </TouchableOpacity>
-            </>
-          )}
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[styles.modalAddBtn, !text.trim() && styles.modalAddBtnDisabled]}
+            onPress={handleAdd}
+            disabled={!text.trim() || saving}>
+            {saving
+              ? <ActivityIndicator color="#0d0d0d" />
+              : <Text style={styles.modalAddBtnText}>Add to session</Text>}
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -225,10 +261,14 @@ type ReactionPickerProps = {
   onSelect: (text: string) => Promise<void>;
   canReact: boolean;
   reactionCount: number;
+  isCompleted: boolean;
 };
 
-function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }: ReactionPickerProps) {
+function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount, isCompleted }: ReactionPickerProps) {
   const [sending, setSending] = useState(false);
+  const options = isCompleted ? REACTION_OPTIONS_COMPLETED : REACTION_OPTIONS_ACTIVE;
+  const title = isCompleted ? 'Celebrate the win' : 'Send a reaction';
+  const remaining = 3 - reactionCount;
 
   async function handleSelect(text: string) {
     setSending(true);
@@ -246,10 +286,12 @@ function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }:
       <View style={styles.reactionSheet}>
         {canReact ? (
           <>
-            <Text style={styles.reactionTitle}>Send a reaction</Text>
-            <Text style={styles.reactionMeta}>{3 - reactionCount} left this task</Text>
+            <Text style={styles.reactionTitle}>{title}</Text>
+            <Text style={styles.reactionMeta}>
+              {remaining} {remaining === 1 ? 'reaction' : 'reactions'} left for this task
+            </Text>
             <View style={styles.reactionOptions}>
-              {REACTION_OPTIONS.map(opt => (
+              {options.map(opt => (
                 <TouchableOpacity
                   key={opt}
                   style={styles.reactionBtn}
@@ -262,7 +304,7 @@ function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }:
           </>
         ) : (
           <>
-            <Text style={styles.reactionTitle}>Reaction limit</Text>
+            <Text style={styles.reactionTitle}>Reaction limit reached</Text>
             <Text style={styles.reactionMeta}>3 reactions per task per session.</Text>
             <TouchableOpacity style={styles.reactionCloseBtn} onPress={onClose}>
               <Text style={styles.reactionCloseBtnText}>OK</Text>
@@ -280,11 +322,14 @@ type ExtendOverlayProps = {
   isHost: boolean;
   hostName: string;
   onExtend: (ms: number) => Promise<void>;
+  onCustomExtend: (minutes: number) => Promise<void>;
   onEnd: () => Promise<void>;
 };
 
-function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps) {
+function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd }: ExtendOverlayProps) {
   const [busy, setBusy] = useState(false);
+  const [customModalVisible, setCustomModalVisible] = useState(false);
+  const [customInput, setCustomInput] = useState('');
 
   async function handleExtend(ms: number) {
     setBusy(true);
@@ -294,6 +339,21 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
   async function handleEnd() {
     setBusy(true);
     try { await onEnd(); } finally { setBusy(false); }
+  }
+
+  async function handleCustomExtend() {
+    const minutes = parseInt(customInput, 10);
+    if (Number.isNaN(minutes) || minutes < 1) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onCustomExtend(minutes);
+      setCustomModalVisible(false);
+      setCustomInput('');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -315,6 +375,12 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
                   <Text style={styles.extendChipText}>{p.label}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity
+                style={[styles.extendChip, busy && styles.extendChipDisabled]}
+                onPress={() => setCustomModalVisible(true)}
+                disabled={busy}>
+                <Text style={styles.extendChipText}>Custom</Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity
               style={[styles.extendEndBtn, busy && styles.extendChipDisabled]}
@@ -331,6 +397,48 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
               disabled={busy}>
               <Text style={styles.extendEndBtnText}>End session</Text>
             </TouchableOpacity>
+
+            <Modal
+              visible={customModalVisible}
+              transparent
+              animationType="slide"
+              onRequestClose={() => setCustomModalVisible(false)}>
+              <KeyboardAvoidingView
+                style={styles.modalOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <TouchableOpacity
+                  style={styles.modalBackdrop}
+                  activeOpacity={1}
+                  onPress={() => setCustomModalVisible(false)}
+                />
+                <View style={styles.modalSheet}>
+                  <View style={styles.modalHandle} />
+                  <Text style={styles.modalTitle}>Extend session</Text>
+                  <Text style={styles.modalSubtitle}>Enter minutes to add</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="e.g. 35"
+                    placeholderTextColor="#555"
+                    value={customInput}
+                    onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    autoFocus
+                    maxLength={4}
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.modalAddBtn,
+                      (!customInput || parseInt(customInput, 10) < 1 || busy) && styles.modalAddBtnDisabled,
+                    ]}
+                    disabled={!customInput || parseInt(customInput, 10) < 1 || busy}
+                    onPress={handleCustomExtend}>
+                    {busy
+                      ? <ActivityIndicator color="#0d0d0d" />
+                      : <Text style={styles.modalAddBtnText}>Add time</Text>}
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
           </>
         ) : (
           <Text style={styles.extendSubtitle}>
@@ -348,19 +456,19 @@ type MyTaskRowProps = {
   task: SessionTask;
   now: number;
   isActive: boolean;
+  receivedReactions: Reaction[];
   onComplete: () => void;
   onSetActive: () => void;
   onClearActive: () => void;
 };
 
-function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive }: MyTaskRowProps) {
+function MyTaskRow({ task, now, isActive, receivedReactions, onComplete, onSetActive, onClearActive }: MyTaskRowProps) {
   const elapsed = now - task.createdAt;
   const isOld = elapsed > 86400 * 1000;
   const isDone = task.completedAt !== null;
   const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
 
   if (isActive && !isDone) {
-    // Focus card — large, prominent
     return (
       <View style={styles.focusCard}>
         <View style={styles.focusHeader}>
@@ -388,6 +496,7 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
             <Text style={styles.focusClearBtnText}>Clear focus</Text>
           </TouchableOpacity>
         </View>
+        <TaskReactions reactions={receivedReactions} now={now} />
       </View>
     );
   }
@@ -423,6 +532,7 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
             Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
+        <TaskReactions reactions={receivedReactions} now={now} />
       </View>
       {!isDone && (
         <TouchableOpacity style={styles.myDoneBtn} onPress={onComplete} hitSlop={8}>
@@ -438,11 +548,11 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
 type PartnerCardProps = {
   member: SessionMember;
   now: number;
-  recentReactions: Reaction[];
-  onReact: (taskId: string) => void;
+  sentReactions: Reaction[];
+  onReact: (taskId: string, completed: boolean) => void;
 };
 
-function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps) {
+function PartnerCard({ member, now, sentReactions, onReact }: PartnerCardProps) {
   const activeTask = member.tasks.find(t => t.taskId === member.activeTaskId && !t.completedAt);
   const otherTasks = member.tasks.filter(t => t.taskId !== member.activeTaskId);
 
@@ -487,16 +597,15 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
             )}
             <TouchableOpacity
               style={styles.reactBtnFocus}
-              onPress={() => onReact(activeTask.taskId)}
+              onPress={() => onReact(activeTask.taskId, false)}
               hitSlop={8}>
               <Text style={styles.reactBtnFocusText}>React</Text>
             </TouchableOpacity>
           </View>
-          {recentReactions.find(r => r.taskId === activeTask.taskId) && (
-            <Text style={styles.partnerReactionBubble}>
-              "{recentReactions.find(r => r.taskId === activeTask.taskId)!.text}"
-            </Text>
-          )}
+          <TaskReactions
+            reactions={sentReactions.filter(r => r.taskId === activeTask.taskId)}
+            now={now}
+          />
         </View>
       )}
 
@@ -504,7 +613,7 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
       {otherTasks.map(task => {
         const elapsed = now - task.createdAt;
         const isDone = task.completedAt !== null;
-        const latestReaction = recentReactions.find(r => r.taskId === task.taskId);
+        const taskReactions = sentReactions.filter(r => r.taskId === task.taskId);
 
         return (
           <View key={task.taskId} style={[styles.partnerTask, isDone && styles.partnerTaskDone]}>
@@ -534,18 +643,16 @@ function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps
                   Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
                 </Text>
               )}
-              {latestReaction && (
-                <Text style={styles.partnerReactionBubble}>"{latestReaction.text}"</Text>
-              )}
+              <TaskReactions reactions={taskReactions} now={now} />
             </View>
-            {!isDone && (
-              <TouchableOpacity
-                style={styles.reactBtn}
-                onPress={() => onReact(task.taskId)}
-                hitSlop={8}>
-                <Text style={styles.reactBtnText}>React</Text>
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={[styles.reactBtn, isDone && styles.reactBtnCompleted]}
+              onPress={() => onReact(task.taskId, isDone)}
+              hitSlop={8}>
+              <Text style={[styles.reactBtnText, isDone && styles.reactBtnCompletedText]}>
+                {isDone ? '🎉' : 'React'}
+              </Text>
+            </TouchableOpacity>
           </View>
         );
       })}
@@ -651,16 +758,22 @@ export default function SessionScreen({ route, navigation }: Props) {
     leaveSession,
     extendSession,
     addTask,
+    removeTask,
     completeTask,
     setActiveTask,
     sendReaction,
-    syncMyTasksToSolo,
+    finalizeSession,
   } = useSession(sessionId);
 
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [reactionTarget, setReactionTarget] = useState<{ toUserId: string; taskId: string } | null>(null);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [reactionTarget, setReactionTarget] = useState<{
+    toUserId: string;
+    taskId: string;
+    completed: boolean;
+  } | null>(null);
 
   // Invite code chip
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -731,12 +844,76 @@ export default function SessionScreen({ route, navigation }: Props) {
     prevMemberCountRef.current = members.length;
   }, [members, loading, userId, flash]);
 
+  // Incoming reaction notification — fire a flash when a new reaction lands on one of MY tasks
+  const prevIncomingReactionIdsRef = useRef<Set<string>>(new Set());
+  const incomingReactionsBootstrapped = useRef(false);
+  useEffect(() => {
+    if (loading) { return; }
+    const incoming = reactions.filter(r => r.toUserId === userId);
+    if (!incomingReactionsBootstrapped.current) {
+      prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
+      incomingReactionsBootstrapped.current = true;
+      return;
+    }
+    const fresh = incoming.filter(r => !prevIncomingReactionIdsRef.current.has(r.id));
+    if (fresh.length > 0) {
+      const r = fresh[0];
+      const senderName = members.find(m => m.userId === r.fromUserId)?.displayName ?? 'Someone';
+      const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title;
+      flash(`${senderName}: "${r.text}"${taskTitle ? ` on "${taskTitle}"` : ''}`);
+    }
+    prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
+  }, [reactions, loading, userId, members, myMember, flash]);
+
   const myActiveTasks = myMember?.tasks.filter(t => t.completedAt === null) ?? [];
-  const atLimit = (myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS;
+  const myCompletedTasks = myMember?.tasks.filter(t => t.completedAt !== null) ?? [];
 
   const timeLeft = session?.endsAt ? Math.max(0, session.endsAt - now) : null;
   const timerExpired = timeLeft !== null && timeLeft <= 0 && session?.status === 'active';
   const sessionEnded = session?.status === 'ended';
+  const timerNotificationFiredRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      const granted = await requestNotificationPermissions();
+      if (!granted || !alive) {
+        return;
+      }
+      await ensureNotificationChannel();
+    };
+    run().catch(console.error);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!session?.endsAt || session.status !== 'active') {
+        await cancelSessionTimerNotification();
+        return;
+      }
+      await scheduleSessionTimerNotification(session.endsAt);
+    };
+    run().catch(() => {
+      flash('Could not schedule background timer notification.');
+    });
+  }, [session?.endsAt, session?.status, flash]);
+
+  useEffect(() => {
+    if (!session?.endsAt || session.status !== 'active') {
+      timerNotificationFiredRef.current = false;
+      return;
+    }
+    if (timerExpired && !timerNotificationFiredRef.current) {
+      timerNotificationFiredRef.current = true;
+      showSessionTimerNotificationNow().catch(console.error);
+    }
+    if (!timerExpired) {
+      timerNotificationFiredRef.current = false;
+    }
+  }, [timerExpired, session?.endsAt, session?.status]);
 
   // When the session ends, each user clears their own activeSessionId and syncs
   // session-only tasks back to Solo. (The host already cleared their own inside
@@ -746,9 +923,9 @@ export default function SessionScreen({ route, navigation }: Props) {
     if (sessionEnded && !syncedOnEndRef.current) {
       syncedOnEndRef.current = true;
       clearActiveSession().catch(console.error);
-      syncMyTasksToSolo().catch(console.error);
+      finalizeSession().catch(console.error);
     }
-  }, [sessionEnded, clearActiveSession, syncMyTasksToSolo]);
+  }, [sessionEnded, clearActiveSession, finalizeSession]);
 
   // Host name for the extend overlay non-host message
   const hostMember = members.find(m => m.userId === session?.createdBy);
@@ -766,8 +943,8 @@ export default function SessionScreen({ route, navigation }: Props) {
   }
 
   async function handleLeave() {
-    // Sync session-only tasks to Solo before removing the member document.
-    await syncMyTasksToSolo().catch(console.error);
+    // Save history and sync session-only tasks to Solo before removing the member doc.
+    await finalizeSession().catch(console.error);
     leaveSession().catch(console.error);
     navigation.popToTop();
   }
@@ -775,6 +952,10 @@ export default function SessionScreen({ route, navigation }: Props) {
   async function handleCompleteTask(task: SessionTask) {
     await completeTask(task);
     flash(`You did it. "${task.title}" — gone.`);
+  }
+
+  async function handleRemoveTask(task: SessionTask) {
+    await removeTask(task.taskId);
   }
 
   function handleSetActive(taskId: string) {
@@ -875,6 +1056,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           isHost={isHost}
           hostName={hostName}
           onExtend={extendSession}
+          onCustomExtend={async minutes => extendSession(minutes * 60 * 1000)}
           onEnd={endSession}
         />
       )}
@@ -886,33 +1068,68 @@ export default function SessionScreen({ route, navigation }: Props) {
 
         {/* My tasks */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your tasks</Text>
-            <Text style={styles.sectionMeta}>{myMember?.tasks.length ?? 0}/{MAX_SESSION_TASKS}</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Your tasks</Text>
 
-          {(myMember?.tasks.length ?? 0) === 0 && (
+          {myActiveTasks.length === 0 && myCompletedTasks.length === 0 && (
             <Text style={styles.emptyMy}>Add tasks you're working on this session.</Text>
           )}
 
-          {myMember?.tasks.map(task => (
-            <MyTaskRow
-              key={task.taskId}
-              task={task}
-              now={now}
-              isActive={myMember.activeTaskId === task.taskId}
-              onComplete={() => handleCompleteTask(task)}
-              onSetActive={() => handleSetActive(task.taskId)}
-              onClearActive={() => setActiveTask(null)}
-            />
-          ))}
+          <View style={styles.taskGap}>
+            {myActiveTasks.map(task => (
+              <SwipeableRow
+                key={task.taskId}
+                onDelete={() => handleRemoveTask(task)}
+                borderRadius={10}>
+                <MyTaskRow
+                  task={task}
+                  now={now}
+                  isActive={(myMember?.activeTaskId ?? null) === task.taskId}
+                  receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
+                  onComplete={() => handleCompleteTask(task)}
+                  onSetActive={() => handleSetActive(task.taskId)}
+                  onClearActive={() => setActiveTask(null)}
+                />
+              </SwipeableRow>
+            ))}
+          </View>
 
-          {!atLimit && (
-            <TouchableOpacity
-              style={styles.addTaskBtn}
-              onPress={() => setAddModalVisible(true)}>
-              <Text style={styles.addTaskBtnText}>+ Add task</Text>
-            </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addTaskBtn}
+            onPress={() => setAddModalVisible(true)}>
+            <Text style={styles.addTaskBtnText}>+ Add task</Text>
+          </TouchableOpacity>
+
+          {myCompletedTasks.length > 0 && (
+            <>
+              <TouchableOpacity
+                style={styles.completedToggle}
+                onPress={() => setCompletedExpanded(e => !e)}
+                activeOpacity={0.7}>
+                <Text style={styles.completedToggleText}>
+                  Done this session ({myCompletedTasks.length})
+                </Text>
+                <Text style={styles.completedToggleChevron}>
+                  {completedExpanded ? '▲' : '▼'}
+                </Text>
+              </TouchableOpacity>
+
+              {completedExpanded && (
+                <View style={styles.taskGap}>
+                  {myCompletedTasks.map(task => (
+                    <MyTaskRow
+                      key={task.taskId}
+                      task={task}
+                      now={now}
+                      isActive={false}
+                      receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
+                      onComplete={() => {}}
+                      onSetActive={() => {}}
+                      onClearActive={() => {}}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </View>
 
@@ -920,7 +1137,7 @@ export default function SessionScreen({ route, navigation }: Props) {
         {myActiveTasks.length > 0 && myMember?.activeTaskId === null && (
           <View style={styles.focusHint}>
             <Text style={styles.focusHintText}>
-              Tap the dot next to a task to set your focus. Your partner can see what you're working on.
+              Tap the dot next to a task to set your focus. Your partner can see what you're working on. Swipe left to remove tasks.
             </Text>
           </View>
         )}
@@ -949,8 +1166,10 @@ export default function SessionScreen({ route, navigation }: Props) {
             <PartnerCard
               member={member}
               now={now}
-              recentReactions={reactions.filter(r => r.toUserId === member.userId)}
-              onReact={taskId => setReactionTarget({ toUserId: member.userId, taskId })}
+              sentReactions={reactions.filter(r => r.fromUserId === userId && r.toUserId === member.userId)}
+              onReact={(taskId, completed) =>
+                setReactionTarget({ toUserId: member.userId, taskId, completed })
+              }
             />
           </View>
         ))}
@@ -971,7 +1190,6 @@ export default function SessionScreen({ route, navigation }: Props) {
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
         onAdd={handleAddTask}
-        atLimit={atLimit}
       />
 
       {reactionTarget !== null && (
@@ -981,6 +1199,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           onSelect={handleSendReaction}
           canReact={canReact(reactionTarget.taskId)}
           reactionCount={myReactionCountForTask(reactionTarget.taskId)}
+          isCompleted={reactionTarget.completed}
         />
       )}
     </SafeAreaView>
@@ -1206,7 +1425,6 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#6366f1',
     padding: 18,
-    marginBottom: 8,
     gap: 6,
   },
   focusHeader: {
@@ -1280,6 +1498,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
+  taskGap: {
+    gap: 8,
+  },
   // Regular my-task row
   myTaskRow: {
     flexDirection: 'row',
@@ -1289,7 +1510,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#2a2a2a',
     padding: 12,
-    marginBottom: 8,
     gap: 10,
   },
   myTaskRowDone: { opacity: 0.45 },
@@ -1356,8 +1576,27 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     paddingVertical: 12,
     alignItems: 'center',
+    marginTop: 4,
   },
   addTaskBtnText: { color: '#444', fontSize: 14 },
+  completedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#1a1a1a',
+  },
+  completedToggleText: {
+    color: '#444',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  completedToggleChevron: {
+    color: '#333',
+    fontSize: 10,
+  },
 
   // Partner card
   partnerCard: {
@@ -1465,12 +1704,6 @@ const styles = StyleSheet.create({
   partnerTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
   partnerEstimate: { color: '#888', fontSize: 11 },
   partnerEstimateOver: { color: '#c0392b' },
-  partnerReactionBubble: {
-    color: '#6366f1',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
   reactBtn: {
     borderRadius: 6,
     borderWidth: 1,
@@ -1480,6 +1713,55 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   reactBtnText: { color: '#555', fontSize: 12 },
+  reactBtnCompleted: {
+    borderColor: '#2a2a3a',
+    backgroundColor: '#13132a',
+  },
+  reactBtnCompletedText: {
+    fontSize: 14,
+  },
+
+  // Per-task expandable reaction list
+  taskReactions: {
+    marginTop: 6,
+  },
+  taskReactionsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  taskReactionsCount: {
+    color: '#6366f1',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  taskReactionsChevron: {
+    fontSize: 9,
+    color: '#6366f1',
+  },
+  taskReactionsList: {
+    marginTop: 5,
+    gap: 5,
+    paddingLeft: 4,
+    borderLeftWidth: 1,
+    borderLeftColor: '#2a2a4a',
+  },
+  taskReactionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  taskReactionText: {
+    color: '#8888cc',
+    fontSize: 12,
+    fontStyle: 'italic',
+    flex: 1,
+  },
+  taskReactionTime: {
+    color: '#333',
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+  },
 
   // Extend overlay
   extendOverlay: {
@@ -1502,6 +1784,7 @@ const styles = StyleSheet.create({
     borderColor: '#2a2a2a',
     padding: 28,
     gap: 12,
+    alignItems: 'center',
   },
   extendTitle: {
     color: '#f5f5f5',
@@ -1513,12 +1796,14 @@ const styles = StyleSheet.create({
     color: '#555',
     fontSize: 15,
     lineHeight: 21,
+    textAlign: 'center',
   },
   extendBtns: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
     marginTop: 4,
+    justifyContent: 'center',
   },
   extendChip: {
     backgroundColor: '#1a1a1a',

@@ -174,9 +174,6 @@ export async function addTaskToSession(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  if (member.tasks.length >= 6) {
-    throw new Error('You can only bring 6 tasks into a session.');
-  }
   await memberRef.update({ tasks: [...member.tasks, task] });
 }
 

@@ -25,6 +25,8 @@ export async function addTask(
 /**
  * Write a task with explicit timestamps — used to port session tasks back to Solo
  * while preserving the original createdAt (and completedAt if already done).
+ * Passing sessionId marks the task as originating from a Together session so it
+ * is excluded from the solo history view.
  */
 export async function addTaskFromSession(
   userId: string,
@@ -33,6 +35,7 @@ export async function addTaskFromSession(
     createdAt: number;
     completedAt: number | null;
     estimatedMs: number | null;
+    sessionId?: string;
   },
 ): Promise<void> {
   const ref = tasksCollection(userId).doc();
@@ -44,13 +47,23 @@ export async function addTaskFromSession(
     completedAt: data.completedAt,
     estimatedMs: data.estimatedMs,
     isPublic: false,
+    ...(data.sessionId ? { sessionId: data.sessionId } : {}),
   };
   await ref.set(task);
 }
 
-export async function completeTask(userId: string, taskId: string): Promise<void> {
+/**
+ * Mark a task as complete. Pass completedInSessionId when completing from inside
+ * a Together session so the task is excluded from the solo history view.
+ */
+export async function completeTask(
+  userId: string,
+  taskId: string,
+  completedInSessionId?: string,
+): Promise<void> {
   await tasksCollection(userId).doc(taskId).update({
     completedAt: Date.now(),
+    ...(completedInSessionId ? { completedInSessionId } : {}),
   });
 }
 

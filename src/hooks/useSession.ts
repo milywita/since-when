@@ -18,7 +18,8 @@ import {
   completeTask as svcCompleteSoloTask,
   addTaskFromSession as svcAddTaskFromSession,
 } from '../services/taskService';
-import type { Session, SessionMember, SessionTask, Reaction } from '../types/Session';
+import { saveSessionHistory } from '../services/historyService';
+import type { Session, SessionMember, SessionTask, Reaction, PartnerSummary, SessionHistoryRecord } from '../types/Session';
 import { MAX_REACTIONS_PER_TASK } from '../types/Session';
 
 export function useSession(sessionId: string) {
@@ -100,13 +101,14 @@ export function useSession(sessionId: string) {
 
   /**
    * Complete a session task. If the task was imported from Solo mode
-   * (sourceSoloTaskId is set), the original Solo task is also marked complete.
+   * (sourceSoloTaskId is set), the original Solo task is also marked complete
+   * and tagged with completedInSessionId so it is excluded from solo history.
    */
   const completeTask = useCallback(
     async (task: SessionTask) => {
       await svcCompleteTask(sessionId, userId, task.taskId);
       if (task.sourceSoloTaskId) {
-        await svcCompleteSoloTask(userId, task.sourceSoloTaskId).catch(err =>
+        await svcCompleteSoloTask(userId, task.sourceSoloTaskId, sessionId).catch(err =>
           console.warn('[useSession] could not sync solo task completion:', err.message),
         );
       }
@@ -145,12 +147,39 @@ export function useSession(sessionId: string) {
           createdAt: task.createdAt,
           completedAt: task.completedAt,
           estimatedMs: task.estimatedMs ?? null,
+          sessionId,
         }).catch(err =>
           console.warn('[useSession] syncMyTasksToSolo failed for task:', task.title, err.message),
         ),
       ),
     );
   }, [myMember, userId]);
+
+  /**
+   * Full session exit routine: sync session-only tasks back to Solo and save
+   * a together-session history record to users/{uid}/sessionHistory.
+   * Call this instead of syncMyTasksToSolo on both end and leave.
+   */
+  const finalizeSession = useCallback(async () => {
+    await syncMyTasksToSolo();
+    if (!myMember || !session) { return; }
+    const partners: PartnerSummary[] = otherMembers.map(m => ({
+      userId: m.userId,
+      displayName: m.displayName,
+      tasks: m.tasks,
+    }));
+    const record: SessionHistoryRecord = {
+      sessionId,
+      startedAt: session.startedAt ?? Date.now(),
+      endedAt: Date.now(),
+      partners,
+      myTasks: myMember.tasks,
+      reactionsReceived: reactions.filter(r => r.toUserId === userId),
+    };
+    await saveSessionHistory(userId, record).catch(err =>
+      console.warn('[useSession] saveSessionHistory failed:', err.message),
+    );
+  }, [syncMyTasksToSolo, myMember, session, otherMembers, reactions, userId, sessionId]);
 
   return {
     session,
@@ -174,5 +203,6 @@ export function useSession(sessionId: string) {
     setActiveTask,
     sendReaction,
     syncMyTasksToSolo,
+    finalizeSession,
   };
 }
