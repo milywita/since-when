@@ -14,8 +14,11 @@ import {
   ScrollView,
   Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
+import { Screen } from '../components/ui/Screen';
+import { PartnerCard } from '../components/session/PartnerCard';
+import { SessionTimerCard } from '../components/session/SessionTimerCard';
+import { theme } from '../theme/themes';
 import { useSession } from '../hooks/useSession';
 import { subscribeToUserProfile } from '../services/userService';
 import {
@@ -23,24 +26,13 @@ import {
   approveJoinRequest,
   denyJoinRequest,
 } from '../services/sessionService';
-import type { SessionMember, SessionTask, Reaction, JoinRequest } from '../types/Session';
+import type { SessionMember, SessionTask, JoinRequest } from '../types/Session';
 import { REACTION_OPTIONS, MAX_SESSION_TASKS, EXTEND_PRESETS } from '../types/Session';
 import type { UserProfile } from '../types/User';
 import type { AppScreenProps } from '../navigation/types';
+import { formatElapsed } from '../utils/formatElapsed';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const mins = Math.floor((totalSec % 3600) / 60);
-  const secs = totalSec % 60;
-  if (days > 0) { return `${days}d ${hours}h ${mins}m`; }
-  if (hours > 0) { return `${hours}h ${mins}m ${secs}s`; }
-  if (mins > 0) { return `${mins}m ${secs}s`; }
-  return `${secs}s`;
-}
 
 function formatCountdown(ms: number): string {
   if (ms <= 0) { return '0:00'; }
@@ -71,36 +63,6 @@ function useDoneFlash() {
     ]).start();
   }, [opacity]);
   return { opacity, message, flash };
-}
-
-// ─── Pulsing dot for the active/focus indicator ───────────────────────────────
-
-function PulsingDot() {
-  const scale = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(scale, { toValue: 1.5, duration: 700, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0.3, duration: 700, useNativeDriver: true }),
-        ]),
-        Animated.parallel([
-          Animated.timing(scale, { toValue: 1, duration: 700, useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 1, duration: 700, useNativeDriver: true }),
-        ]),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [scale, opacity]);
-
-  return (
-    <Animated.View
-      style={[styles.pulsingDot, { transform: [{ scale }], opacity }]}
-    />
-  );
 }
 
 // ─── Time estimate presets (mirrors solo mode) ────────────────────────────────
@@ -172,7 +134,7 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
               <TextInput
                 style={styles.modalInput}
                 placeholder="e.g. Fix the login bug"
-                placeholderTextColor="#555"
+                placeholderTextColor={theme.colors.textSoft}
                 value={text}
                 onChangeText={setText}
                 autoFocus
@@ -206,7 +168,7 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit }: AddTaskModalProps) {
                 onPress={handleAdd}
                 disabled={!text.trim() || saving}>
                 {saving
-                  ? <ActivityIndicator color="#0d0d0d" />
+                  ? <ActivityIndicator color={theme.colors.primaryText} />
                   : <Text style={styles.modalAddBtnText}>Add to session</Text>}
               </TouchableOpacity>
             </>
@@ -360,35 +322,13 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
   const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
 
   if (isActive && !isDone) {
-    // Focus card — large, prominent
     return (
-      <View style={styles.focusCard}>
-        <View style={styles.focusHeader}>
-          <PulsingDot />
-          <Text style={styles.focusLabel}>FOCUS</Text>
-        </View>
-        <Text style={styles.focusTitle}>{task.title}</Text>
-        <View style={styles.focusTimerRow}>
-          <Text style={[styles.focusTimer, (isOld || overEstimate) && styles.focusTimerOld]}>
-            {formatElapsed(elapsed)}
-          </Text>
-          {task.estimatedMs != null && (
-            <Text style={[styles.focusEstimate, overEstimate && styles.focusEstimateOver]}>
-              {overEstimate
-                ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
-                : `est. ${formatElapsed(task.estimatedMs)}`}
-            </Text>
-          )}
-        </View>
-        <View style={styles.focusActions}>
-          <TouchableOpacity style={styles.focusDoneBtn} onPress={onComplete}>
-            <Text style={styles.focusDoneBtnText}>Mark done</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.focusClearBtn} onPress={onClearActive}>
-            <Text style={styles.focusClearBtnText}>Clear focus</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+      <SessionTimerCard
+        task={task}
+        now={now}
+        onComplete={onComplete}
+        onClearFocus={onClearActive}
+      />
     );
   }
 
@@ -433,126 +373,6 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
   );
 }
 
-// ─── Partner member card ──────────────────────────────────────────────────────
-
-type PartnerCardProps = {
-  member: SessionMember;
-  now: number;
-  recentReactions: Reaction[];
-  onReact: (taskId: string) => void;
-};
-
-function PartnerCard({ member, now, recentReactions, onReact }: PartnerCardProps) {
-  const activeTask = member.tasks.find(t => t.taskId === member.activeTaskId && !t.completedAt);
-  const otherTasks = member.tasks.filter(t => t.taskId !== member.activeTaskId);
-
-  return (
-    <View style={styles.partnerCard}>
-      <View style={styles.partnerHeader}>
-        <View style={styles.partnerOnlineDot} />
-        <Text style={styles.partnerName}>{member.displayName}</Text>
-        <Text style={styles.partnerTaskCount}>
-          {member.tasks.filter(t => !t.completedAt).length} active
-        </Text>
-      </View>
-
-      {member.tasks.length === 0 && (
-        <Text style={styles.partnerEmpty}>No tasks added yet.</Text>
-      )}
-
-      {/* Active/focus task shown first and highlighted */}
-      {activeTask && (
-        <View style={styles.partnerFocusTask}>
-          <View style={styles.partnerFocusHeader}>
-            <PulsingDot />
-            <Text style={styles.partnerFocusLabel}>FOCUS</Text>
-          </View>
-          <Text style={styles.partnerFocusTitle} numberOfLines={2}>{activeTask.title}</Text>
-          <View style={styles.partnerFocusMeta}>
-            <Text style={[
-              styles.partnerFocusTimer,
-              now - activeTask.createdAt > 86400 * 1000 && styles.partnerTaskTimerOld,
-            ]}>
-              {formatElapsed(now - activeTask.createdAt)}
-            </Text>
-            {activeTask.estimatedMs != null && (
-              <Text style={[
-                styles.partnerEstimate,
-                now - activeTask.createdAt > activeTask.estimatedMs && styles.partnerEstimateOver,
-              ]}>
-                {now - activeTask.createdAt > activeTask.estimatedMs
-                  ? `over by ${formatElapsed((now - activeTask.createdAt) - activeTask.estimatedMs)}`
-                  : `est. ${formatElapsed(activeTask.estimatedMs)}`}
-              </Text>
-            )}
-            <TouchableOpacity
-              style={styles.reactBtnFocus}
-              onPress={() => onReact(activeTask.taskId)}
-              hitSlop={8}>
-              <Text style={styles.reactBtnFocusText}>React</Text>
-            </TouchableOpacity>
-          </View>
-          {recentReactions.find(r => r.taskId === activeTask.taskId) && (
-            <Text style={styles.partnerReactionBubble}>
-              "{recentReactions.find(r => r.taskId === activeTask.taskId)!.text}"
-            </Text>
-          )}
-        </View>
-      )}
-
-      {/* Remaining tasks */}
-      {otherTasks.map(task => {
-        const elapsed = now - task.createdAt;
-        const isDone = task.completedAt !== null;
-        const latestReaction = recentReactions.find(r => r.taskId === task.taskId);
-
-        return (
-          <View key={task.taskId} style={[styles.partnerTask, isDone && styles.partnerTaskDone]}>
-            <View style={styles.partnerTaskLeft}>
-              <Text
-                style={[styles.partnerTaskTitle, isDone && styles.partnerTaskTitleDone]}
-                numberOfLines={2}>
-                {task.title}
-              </Text>
-              {!isDone && (
-                <Text style={[styles.partnerTaskTimer, elapsed > 86400 * 1000 && styles.partnerTaskTimerOld]}>
-                  {formatElapsed(elapsed)}
-                </Text>
-              )}
-              {!isDone && task.estimatedMs != null && (
-                <Text style={[
-                  styles.partnerEstimate,
-                  elapsed > task.estimatedMs && styles.partnerEstimateOver,
-                ]}>
-                  {elapsed > task.estimatedMs
-                    ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
-                    : `est. ${formatElapsed(task.estimatedMs)}`}
-                </Text>
-              )}
-              {isDone && (
-                <Text style={styles.partnerTaskDoneLabel}>
-                  Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
-                </Text>
-              )}
-              {latestReaction && (
-                <Text style={styles.partnerReactionBubble}>"{latestReaction.text}"</Text>
-              )}
-            </View>
-            {!isDone && (
-              <TouchableOpacity
-                style={styles.reactBtn}
-                onPress={() => onReact(task.taskId)}
-                hitSlop={8}>
-                <Text style={styles.reactBtnText}>React</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
 // ─── Join request popup (host sees this) ─────────────────────────────────────
 
 type JoinRequestPopupProps = {
@@ -588,7 +408,7 @@ function JoinRequestPopup({ request, onApprove, onDeny, busy }: JoinRequestPopup
             onPress={onApprove}
             disabled={busy}>
             {busy
-              ? <ActivityIndicator color="#fff" size="small" />
+              ? <ActivityIndicator color={theme.colors.onAccent} size="small" />
               : <Text style={styles.joinApproveBtnText}>Let them in</Text>}
           </TouchableOpacity>
         </View>
@@ -790,35 +610,39 @@ export default function SessionScreen({ route, navigation }: Props) {
 
   if (loading) {
     return (
-      <View style={styles.loadingRoot}>
-        <ActivityIndicator size="large" color="#f5f5f5" />
-      </View>
+      <Screen>
+        <View style={styles.loadingRoot}>
+          <ActivityIndicator size="large" color={theme.colors.text} />
+        </View>
+      </Screen>
     );
   }
 
   if (error || !session) {
     return (
-      <View style={styles.loadingRoot}>
-        <Text style={styles.errorText}>{error ?? 'Session not found.'}</Text>
-        <TouchableOpacity style={styles.errorBackBtn} onPress={() => navigation.popToTop()}>
-          <Text style={styles.errorBackBtnText}>Go back</Text>
-        </TouchableOpacity>
-      </View>
+      <Screen>
+        <View style={styles.loadingRoot}>
+          <Text style={styles.errorText}>{error ?? 'Session not found.'}</Text>
+          <TouchableOpacity style={styles.errorBackBtn} onPress={() => navigation.popToTop()}>
+            <Text style={styles.errorBackBtnText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </Screen>
     );
   }
 
   if (sessionEnded) {
     return (
-      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+      <Screen safeArea edges={['top', 'bottom']}>
         <EndedOverlay myMember={myMember} onBack={() => navigation.popToTop()} />
-      </SafeAreaView>
+      </Screen>
     );
   }
 
   const isTimerWarning = timeLeft !== null && timeLeft < 5 * 60 * 1000 && !timerExpired;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <Screen safeArea edges={['top']}>
       {/* Flash banner */}
       <Animated.View style={[styles.flashBanner, { opacity: flashOpacity }]} pointerEvents="none">
         <Text style={styles.flashText}>{flashMessage}</Text>
@@ -983,36 +807,35 @@ export default function SessionScreen({ route, navigation }: Props) {
           reactionCount={myReactionCountForTask(reactionTarget.taskId)}
         />
       )}
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+const c = theme.colors;
+const sp = theme.spacing;
+const r = theme.radius;
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#0d0d0d',
-  },
   loadingRoot: {
     flex: 1,
-    backgroundColor: '#0d0d0d',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
-    gap: 16,
+    paddingHorizontal: sp.xl + sp.sm,
+    gap: sp.lg,
   },
   errorText: {
-    color: '#c0392b',
+    color: c.danger,
     fontSize: 15,
     textAlign: 'center',
   },
   errorBackBtn: {
     paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingHorizontal: sp.gutter,
   },
   errorBackBtnText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
   },
 
@@ -1020,18 +843,18 @@ const styles = StyleSheet.create({
   flashBanner: {
     position: 'absolute',
     top: 60,
-    left: 20,
-    right: 20,
+    left: sp.gutter,
+    right: sp.gutter,
     zIndex: 100,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    backgroundColor: c.surface,
+    borderRadius: r.md,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingVertical: 14,
     paddingHorizontal: 18,
   },
   flashText: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
@@ -1042,110 +865,110 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 8,
+    paddingHorizontal: sp.gutter,
+    paddingTop: sp.lg,
+    paddingBottom: sp.sm,
   },
   headerTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#f5f5f5',
+    color: c.text,
     letterSpacing: -0.5,
   },
   modeBadge: {
-    marginTop: 4,
+    marginTop: sp.xs,
     alignSelf: 'flex-start',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: c.surface,
     borderRadius: 5,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingHorizontal: 7,
     paddingVertical: 2,
   },
   modeBadgeText: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#6366f1',
+    color: c.accent,
     letterSpacing: 1.5,
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginTop: 4,
+    gap: sp.md,
+    marginTop: sp.xs,
   },
   countdown: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#f5f5f5',
+    color: c.text,
     fontVariant: ['tabular-nums'],
   },
   countdownWarning: {
-    color: '#c0392b',
+    color: c.danger,
   },
   countdownExpired: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
     fontWeight: '500',
   },
   // Invite card (shown in scroll body while no one has joined)
   inviteCard: {
-    backgroundColor: '#13132a',
+    backgroundColor: c.accentSurface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2a2a4a',
-    padding: 20,
+    borderColor: c.accentSurfaceBorder,
+    padding: sp.gutter,
     alignItems: 'center',
     gap: 6,
   },
   inviteCardLabel: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#6366f1',
+    color: c.accent,
     letterSpacing: 2,
   },
   inviteCardCode: {
     fontSize: 36,
     fontWeight: '700',
-    color: '#f5f5f5',
+    color: c.text,
     letterSpacing: 8,
     fontVariant: ['tabular-nums'],
   },
   inviteCardHint: {
     fontSize: 11,
-    color: '#444',
+    color: c.textDim,
     marginTop: 2,
   },
   endBtn: {
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: sp.md,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   endBtnText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 13,
   },
   leaveBtn: {
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: sp.md,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: '#3d1a1a',
+    borderColor: c.borderDanger,
   },
   leaveBtnText: {
-    color: '#c0392b',
+    color: c.danger,
     fontSize: 13,
   },
 
   // Scroll
   scroll: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: sp.gutter,
     paddingBottom: 60,
-    gap: 24,
-    paddingTop: 8,
+    gap: sp.xl,
+    paddingTop: sp.sm,
   },
 
   // Sections
@@ -1153,143 +976,54 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 8,
+    gap: sp.sm,
     marginBottom: 10,
   },
   sectionTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 16,
     fontWeight: '600',
   },
   sectionMeta: {
-    color: '#333',
+    color: c.textFaint,
     fontSize: 12,
   },
   emptyMy: {
-    color: '#333',
+    color: c.textFaint,
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: sp.sm,
   },
   waitingPartner: {
-    color: '#333',
+    color: c.textFaint,
     fontSize: 14,
   },
 
   // Focus hint
   focusHint: {
-    backgroundColor: '#13132a',
-    borderRadius: 10,
+    backgroundColor: c.accentSurface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a4a',
-    paddingVertical: 12,
+    borderColor: c.accentSurfaceBorder,
+    paddingVertical: sp.md,
     paddingHorizontal: 14,
   },
   focusHintText: {
-    color: '#6366f1',
+    color: c.accent,
     fontSize: 13,
     lineHeight: 18,
     opacity: 0.8,
-  },
-
-  // Pulsing dot
-  pulsingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#6366f1',
-  },
-
-  // Focus card (my active task, prominent)
-  focusCard: {
-    backgroundColor: '#13132a',
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#6366f1',
-    padding: 18,
-    marginBottom: 8,
-    gap: 6,
-  },
-  focusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginBottom: 2,
-  },
-  focusLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#6366f1',
-    letterSpacing: 2,
-  },
-  focusTitle: {
-    color: '#f5f5f5',
-    fontSize: 20,
-    fontWeight: '600',
-    lineHeight: 26,
-  },
-  focusTimerRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    flexWrap: 'wrap',
-    marginBottom: 4,
-  },
-  focusTimer: {
-    color: '#8b8cf4',
-    fontSize: 16,
-    fontWeight: '500',
-    fontVariant: ['tabular-nums'],
-  },
-  focusTimerOld: {
-    color: '#c0392b',
-  },
-  focusEstimate: {
-    color: '#555',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-  focusEstimateOver: {
-    color: '#8b2e2e',
-  },
-  focusActions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 6,
-  },
-  focusDoneBtn: {
-    flex: 1,
-    backgroundColor: '#6366f1',
-    borderRadius: 9,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  focusDoneBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  focusClearBtn: {
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: '#2a2a4a',
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-  },
-  focusClearBtnText: {
-    color: '#555',
-    fontSize: 14,
   },
 
   // Regular my-task row
   myTaskRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    padding: 12,
-    marginBottom: 8,
+    borderColor: c.border,
+    padding: sp.md,
+    marginBottom: sp.sm,
     gap: 10,
   },
   myTaskRowDone: { opacity: 0.45 },
@@ -1298,7 +1032,7 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: c.borderStrong,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1306,7 +1040,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: c.border,
   },
   myTaskInfo: { flex: 1, gap: 2 },
   myTaskMeta: {
@@ -1316,170 +1050,48 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   myTaskTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '500',
   },
   myTaskTitleDone: {
     textDecorationLine: 'line-through',
-    color: '#555',
+    color: c.textSoft,
   },
   myTaskTimer: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },
-  myTaskTimerOld: { color: '#c0392b' },
+  myTaskTimerOld: { color: c.danger },
   myTaskEstimate: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },
-  myTaskEstimateOver: { color: '#8b2e2e' },
-  myTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
+  myTaskEstimateOver: { color: c.dangerMuted },
+  myTaskDoneLabel: { color: c.success, fontSize: 12 },
   myDoneBtn: {
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: sp.md,
   },
   myDoneBtnText: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 12,
     fontWeight: '500',
   },
   addTaskBtn: {
-    borderRadius: 10,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     borderStyle: 'dashed',
-    paddingVertical: 12,
+    paddingVertical: sp.md,
     alignItems: 'center',
   },
-  addTaskBtnText: { color: '#444', fontSize: 14 },
-
-  // Partner card
-  partnerCard: {
-    backgroundColor: '#111',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1f1f1f',
-    padding: 14,
-    gap: 8,
-  },
-  partnerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  partnerOnlineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: '#2e6b3e',
-  },
-  partnerName: {
-    color: '#f5f5f5',
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-  },
-  partnerTaskCount: { color: '#333', fontSize: 12 },
-  partnerEmpty: { color: '#333', fontSize: 13 },
-
-  // Partner focus task
-  partnerFocusTask: {
-    backgroundColor: '#13132a',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2a2a4a',
-    padding: 12,
-    gap: 4,
-  },
-  partnerFocusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  partnerFocusLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#6366f1',
-    letterSpacing: 1.5,
-  },
-  partnerFocusTitle: {
-    color: '#f5f5f5',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  partnerFocusMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 2,
-  },
-  partnerFocusTimer: {
-    color: '#8b8cf4',
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  reactBtnFocus: {
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#2a2a4a',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-  },
-  reactBtnFocusText: { color: '#6366f1', fontSize: 12 },
-
-  // Partner regular task
-  partnerTask: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    borderRadius: 8,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 1,
-    borderColor: '#222',
-    padding: 10,
-    gap: 8,
-  },
-  partnerTaskDone: { opacity: 0.4 },
-  partnerTaskLeft: { flex: 1, gap: 3 },
-  partnerTaskTitle: {
-    color: '#f5f5f5',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  partnerTaskTitleDone: {
-    textDecorationLine: 'line-through',
-    color: '#444',
-  },
-  partnerTaskTimer: {
-    color: '#666',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-  partnerTaskTimerOld: { color: '#8b2e2e' },
-  partnerTaskDoneLabel: { color: '#2e6b3e', fontSize: 12 },
-  partnerEstimate: { color: '#888', fontSize: 11 },
-  partnerEstimateOver: { color: '#c0392b' },
-  partnerReactionBubble: {
-    color: '#6366f1',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
-  reactBtn: {
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    marginTop: 2,
-  },
-  reactBtnText: { color: '#555', fontSize: 12 },
+  addTaskBtnText: { color: c.textDim, fontSize: 14 },
 
   // Extend overlay
   extendOverlay: {
@@ -1488,63 +1100,63 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.82)',
+    backgroundColor: c.backdropHeavy,
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 50,
-    paddingHorizontal: 28,
+    paddingHorizontal: sp.xxl,
   },
   extendCard: {
     width: '100%',
-    backgroundColor: '#141414',
+    backgroundColor: c.surfaceRaised,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     padding: 28,
-    gap: 12,
+    gap: sp.md,
   },
   extendTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 26,
     fontWeight: '700',
     letterSpacing: -0.5,
   },
   extendSubtitle: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 15,
     lineHeight: 21,
   },
   extendBtns: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 4,
+    gap: sp.sm,
+    marginTop: sp.xs,
   },
   extendChip: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#6366f1',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    borderColor: c.accent,
+    paddingVertical: sp.md,
+    paddingHorizontal: sp.gutter,
   },
   extendChipDisabled: { opacity: 0.4 },
   extendChipText: {
-    color: '#6366f1',
+    color: c.accent,
     fontSize: 15,
     fontWeight: '600',
   },
   extendEndBtn: {
     backgroundColor: 'transparent',
-    borderRadius: 10,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingVertical: 12,
+    borderColor: c.border,
+    paddingVertical: sp.md,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: sp.xs,
   },
   extendEndBtnText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
   },
 
@@ -1559,103 +1171,103 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: c.backdropModal,
   },
   modalSheet: {
-    backgroundColor: '#141414',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 24,
+    backgroundColor: c.surfaceRaised,
+    borderTopLeftRadius: r.xl,
+    borderTopRightRadius: r.xl,
+    paddingHorizontal: sp.xl,
     paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    paddingTop: 16,
+    paddingTop: sp.lg,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   modalHandle: {
     width: 36,
-    height: 4,
-    backgroundColor: '#333',
+    height: sp.xs,
+    backgroundColor: c.borderStrong,
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: sp.lg,
   },
   modalSubtitle: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 20,
   },
   modalInput: {
-    backgroundColor: '#1a1a1a',
-    color: '#f5f5f5',
-    borderRadius: 10,
-    paddingHorizontal: 16,
+    backgroundColor: c.surface,
+    color: c.text,
+    borderRadius: r.sm,
+    paddingHorizontal: sp.lg,
     paddingVertical: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    marginBottom: 16,
+    borderColor: c.border,
+    marginBottom: sp.lg,
     minHeight: 52,
   },
   estimateLabel: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 13,
     marginBottom: 10,
-    marginTop: 4,
+    marginTop: sp.xs,
   },
   estimateRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
+    gap: sp.sm,
+    marginBottom: sp.lg,
   },
   estimateChip: {
-    borderRadius: 8,
+    borderRadius: sp.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingVertical: 7,
     paddingHorizontal: 13,
   },
   estimateChipSelected: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#f5f5f5',
+    backgroundColor: c.primary,
+    borderColor: c.primary,
   },
   estimateChipText: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 13,
     fontWeight: '500',
   },
   estimateChipTextSelected: {
-    color: '#0d0d0d',
+    color: c.primaryText,
   },
   modalAddBtn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
+    backgroundColor: c.primary,
+    borderRadius: r.sm,
     paddingVertical: 15,
     alignItems: 'center',
   },
   modalAddBtnDisabled: { opacity: 0.3 },
   modalAddBtnText: {
-    color: '#0d0d0d',
+    color: c.primaryText,
     fontSize: 16,
     fontWeight: '600',
   },
   modalCloseBtn: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   modalCloseBtnText: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '500',
   },
@@ -1666,119 +1278,119 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: '#141414',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 24,
+    backgroundColor: c.surfaceRaised,
+    borderTopLeftRadius: r.xl,
+    borderTopRightRadius: r.xl,
+    paddingHorizontal: sp.xl,
     paddingBottom: Platform.OS === 'ios' ? 44 : 28,
-    paddingTop: 24,
+    paddingTop: sp.xl,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     gap: 10,
   },
   reactionTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 18,
     fontWeight: '600',
   },
-  reactionMeta: { color: '#555', fontSize: 13, marginBottom: 4 },
-  reactionOptions: { gap: 8 },
+  reactionMeta: { color: c.textSoft, fontSize: 13, marginBottom: sp.xs },
+  reactionOptions: { gap: sp.sm },
   reactionBtn: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     paddingVertical: 13,
-    paddingHorizontal: 16,
+    paddingHorizontal: sp.lg,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   reactionBtnText: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '500',
   },
   reactionCloseBtn: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     paddingVertical: 13,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
-  reactionCloseBtnText: { color: '#555', fontSize: 14 },
+  reactionCloseBtnText: { color: c.textSoft, fontSize: 14 },
 
   // Join request popup
   joinPopupOverlay: {
     position: 'absolute',
     bottom: 100,
-    left: 16,
-    right: 16,
+    left: sp.lg,
+    right: sp.lg,
     zIndex: 200,
   },
   joinPopupCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
+    backgroundColor: c.surface,
+    borderRadius: r.lg,
     borderWidth: 1.5,
-    borderColor: '#6366f1',
+    borderColor: c.accent,
     padding: 18,
     gap: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
+    shadowColor: c.shadow,
+    shadowOffset: { width: 0, height: sp.sm },
     shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowRadius: sp.lg,
+    elevation: sp.md,
   },
   joinPopupHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: sp.sm,
   },
   joinPopupDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#6366f1',
+    width: sp.sm,
+    height: sp.sm,
+    borderRadius: sp.xs,
+    backgroundColor: c.accent,
   },
   joinPopupName: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 16,
     fontWeight: '700',
   },
   joinPopupLabel: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 14,
   },
   joinPopupMeta: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 13,
-    paddingLeft: 16,
+    paddingLeft: sp.lg,
   },
   joinPopupBtns: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 4,
+    marginTop: sp.xs,
   },
   joinDenyBtn: {
     flex: 1,
-    borderRadius: 10,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingVertical: 12,
+    borderColor: c.border,
+    paddingVertical: sp.md,
     alignItems: 'center',
   },
   joinDenyBtnText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
     fontWeight: '500',
   },
   joinApproveBtn: {
     flex: 2,
-    borderRadius: 10,
-    backgroundColor: '#6366f1',
-    paddingVertical: 12,
+    borderRadius: r.sm,
+    backgroundColor: c.accent,
+    paddingVertical: sp.md,
     alignItems: 'center',
   },
   joinApproveBtnText: {
-    color: '#fff',
+    color: c.onAccent,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1789,21 +1401,21 @@ const styles = StyleSheet.create({
   // Session ended
   endedOverlay: {
     flex: 1,
-    paddingHorizontal: 28,
+    paddingHorizontal: sp.xxl,
     paddingTop: 60,
-    gap: 12,
+    gap: sp.md,
   },
   endedTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 32,
     fontWeight: '700',
     letterSpacing: -0.5,
   },
   endedSubtitle: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 16,
     lineHeight: 22,
-    marginBottom: 8,
+    marginBottom: sp.sm,
   },
   endedTask: {
     flexDirection: 'row',
@@ -1811,20 +1423,20 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   endedTaskMark: {
-    color: '#2e6b3e',
+    color: c.success,
     fontSize: 14,
     fontWeight: '600',
   },
-  endedTaskTitle: { color: '#888', fontSize: 14, flex: 1 },
+  endedTaskTitle: { color: c.textMuted, fontSize: 14, flex: 1 },
   endedBackBtn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingVertical: 16,
+    backgroundColor: c.primary,
+    borderRadius: r.md,
+    paddingVertical: sp.lg,
     alignItems: 'center',
     marginTop: 32,
   },
   endedBackBtnText: {
-    color: '#0d0d0d',
+    color: c.primaryText,
     fontSize: 16,
     fontWeight: '600',
   },

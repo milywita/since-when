@@ -2,18 +2,21 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
 import { getOrCreateUserProfile, setUsername } from '../services/userService';
 import type { AppScreenProps } from '../navigation/types';
+import { Screen } from '../components/ui/Screen';
+import { AppButton } from '../components/ui/AppButton';
+import {
+  AppInput,
+  usernameInputStyle,
+} from '../components/ui/AppInput';
+import { theme } from '../theme/themes';
 
 type Props = AppScreenProps<'UsernameSetup'>;
 
@@ -48,19 +51,19 @@ export default function UsernameSetupScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+    <Screen safeArea edges={['top', 'bottom']}>
       <KeyboardAvoidingView
-        style={styles.inner}
+        style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.top}>
-          <Text style={styles.title}>Pick a username</Text>
-          <Text style={styles.subtitle}>
+          <Text style={theme.typography.heading}>Pick a username</Text>
+          <Text style={[theme.typography.subtitle, styles.setupSubtitle]}>
             This is how others will see you in Together sessions. You can't change it later.
           </Text>
-          <TextInput
-            style={styles.input}
+          <AppInput
+            style={usernameInputStyle()}
             placeholder="e.g. procrastinator42"
-            placeholderTextColor="#444"
+            placeholderTextColor="#444444"
             value={username}
             onChangeText={setUsernameValue}
             autoFocus
@@ -75,27 +78,25 @@ export default function UsernameSetupScreen({ navigation }: Props) {
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.btn, (!isValid || saving) && styles.btnDisabled]}
+        <AppButton
+          title="Let's go"
           onPress={handleConfirm}
-          disabled={!isValid || saving}>
-          {saving
-            ? <ActivityIndicator color="#0d0d0d" />
-            : <Text style={styles.btnText}>Let's go</Text>}
-        </TouchableOpacity>
+          loading={saving}
+          disabled={!isValid || saving}
+          style={[
+            styles.cta,
+            ...((!isValid || saving) ? [styles.ctaDisabled] : []),
+          ]}
+        />
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  flex: {
     flex: 1,
-    backgroundColor: '#0d0d0d',
-  },
-  inner: {
-    flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: theme.spacing.xl,
     paddingTop: 60,
     paddingBottom: 32,
     justifyContent: 'space-between',
@@ -103,44 +104,21 @@ const styles = StyleSheet.create({
   top: {
     gap: 14,
   },
-  title: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#f5f5f5',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#555',
+  setupSubtitle: {
+    color: theme.colors.textSoft,
     lineHeight: 22,
-  },
-  input: {
-    backgroundColor: '#1a1a1a',
-    color: '#f5f5f5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: Platform.OS === 'ios' ? 16 : 13,
-    fontSize: 18,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    marginTop: 8,
   },
   hint: {
     fontSize: 12,
-    color: '#333',
+    color: '#333333',
   },
-  btn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
+  cta: {
+    marginTop: 0,
+    marginBottom: 0,
+    borderRadius: theme.radius.md,
+    paddingVertical: theme.spacing.lg,
   },
-  btnDisabled: {
+  ctaDisabled: {
     opacity: 0.3,
-  },
-  btnText: {
-    color: '#0d0d0d',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

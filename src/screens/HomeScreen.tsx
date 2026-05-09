@@ -10,29 +10,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
+import { Screen } from '../components/ui/Screen';
+import { theme } from '../theme/themes';
+import { EmptyState } from '../components/layout/EmptyState';
+import { ScreenHeader } from '../components/layout/ScreenHeader';
+import { TaskCard } from '../components/tasks/TaskCard';
 import { useTasks } from '../hooks/useTasks';
 import type { Task } from '../types/Task';
 import type { AppScreenProps } from '../navigation/types';
-
-// ─── Elapsed time helpers ────────────────────────────────────────────────────
-
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const mins = Math.floor((totalSec % 3600) / 60);
-  const secs = totalSec % 60;
-
-  if (days > 0) { return `${days}d ${hours}h ${mins}m`; }
-  if (hours > 0) { return `${hours}h ${mins}m ${secs}s`; }
-  if (mins > 0) { return `${mins}m ${secs}s`; }
-  return `${secs}s`;
-}
+import { formatElapsed } from '../utils/formatElapsed';
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -54,67 +43,14 @@ const TIME_PRESETS: { label: string; ms: number }[] = [
   { label: '1 day', ms: 24 * 60 * 60 * 1000 },
 ];
 
-// ─── Task card ────────────────────────────────────────────────────────────────
-
-type TaskCardProps = {
-  task: Task;
-  now: number;
-  onComplete: () => void;
-  onDelete: () => void;
-};
-
-function TaskCard({ task, now, onComplete, onDelete }: TaskCardProps) {
-  const elapsed = now - task.createdAt;
-  const overEstimate = task.estimatedMs !== null && elapsed > task.estimatedMs;
-  const isOld = elapsed > 86400 * 1000;
-
-  function handleLongPress() {
-    Alert.alert(
-      task.title,
-      'What would you like to do?',
-      [
-        { text: 'Mark complete', onPress: onComplete },
-        { text: 'Delete task', style: 'destructive', onPress: onDelete },
-        { text: 'Cancel', style: 'cancel' },
-      ],
-    );
-  }
-
-  return (
-    <TouchableOpacity
-      style={[styles.card, overEstimate && styles.cardOverdue]}
-      onLongPress={handleLongPress}
-      activeOpacity={0.75}>
-      <View style={styles.cardLeft}>
-        <Text style={styles.cardTitle} numberOfLines={2}>{task.title}</Text>
-        <View style={styles.cardMeta}>
-          <Text style={[styles.cardTimer, (isOld || overEstimate) && styles.cardTimerOld]}>
-            {formatElapsed(elapsed)}
-          </Text>
-          {task.estimatedMs !== null && (
-            <Text style={[styles.cardEstimate, overEstimate && styles.cardEstimateOver]}>
-              {overEstimate ? '— over by ' : '— est. '}
-              {overEstimate
-                ? formatElapsed(elapsed - task.estimatedMs)
-                : formatElapsed(task.estimatedMs)}
-            </Text>
-          )}
-        </View>
-      </View>
-      <TouchableOpacity style={styles.doneBtn} onPress={onComplete} hitSlop={12}>
-        <Text style={styles.doneBtnText}>Done</Text>
-      </TouchableOpacity>
-    </TouchableOpacity>
-  );
-}
-
 // ─── Completed task row ───────────────────────────────────────────────────────
 
 type CompletedRowProps = { task: Task };
 
 function CompletedRow({ task }: CompletedRowProps) {
   const duration = (task.completedAt ?? 0) - task.createdAt;
-  const beatEstimate = task.estimatedMs !== null && duration <= task.estimatedMs;
+  const beatEstimate =
+    task.estimatedMs !== null && duration <= task.estimatedMs;
   return (
     <View style={styles.completedRow}>
       <Text style={styles.completedTitle} numberOfLines={1}>{task.title}</Text>
@@ -175,7 +111,7 @@ function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
           <TextInput
             style={styles.modalInput}
             placeholder="e.g. Reply to that email"
-            placeholderTextColor="#555"
+            placeholderTextColor={theme.colors.textSoft}
             value={text}
             onChangeText={setText}
             autoFocus
@@ -205,7 +141,7 @@ function AddTaskModal({ visible, onClose, onAdd }: AddTaskModalProps) {
             onPress={handleAdd}
             disabled={!text.trim() || saving}>
             {saving
-              ? <ActivityIndicator color="#0d0d0d" />
+              ? <ActivityIndicator color={theme.colors.primaryText} />
               : <Text style={styles.modalAddBtnText}>Start the clock</Text>}
           </TouchableOpacity>
         </View>
@@ -257,40 +193,42 @@ export default function HomeScreen({ navigation }: Props) {
 
   if (loading) {
     return (
-      <View style={styles.loadingRoot}>
-        <ActivityIndicator size="large" color="#f5f5f5" />
-      </View>
+      <Screen>
+        <View style={styles.loadingRoot}>
+          <ActivityIndicator size="large" color={theme.colors.text} />
+        </View>
+      </Screen>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.loadingRoot}>
-        <Text style={styles.errorText}>Firestore error:</Text>
-        <Text style={styles.errorDetail}>{error}</Text>
-      </View>
+      <Screen>
+        <View style={styles.loadingRoot}>
+          <Text style={styles.errorText}>Firestore error:</Text>
+          <Text style={styles.errorDetail}>{error}</Text>
+        </View>
+      </Screen>
     );
   }
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <Screen safeArea edges={['top']}>
       {/* ── Flash banner ─────────────────────────────── */}
       <Animated.View style={[styles.flashBanner, { opacity: flashOpacity }]} pointerEvents="none">
         <Text style={styles.flashText}>{flashMessage}</Text>
       </Animated.View>
 
       {/* ── Header ───────────────────────────────────── */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Since When</Text>
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>SOLO</Text>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.signOutBtn} onPress={() => auth().signOut()}>
-          <Text style={styles.signOutText}>Sign out</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title="Since When"
+        badge={{ text: 'SOLO', variant: 'muted' }}
+        trailing={
+          <TouchableOpacity style={styles.signOutBtn} onPress={() => auth().signOut()}>
+            <Text style={styles.signOutText}>Sign out</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {/* ── Together banner ──────────────────────────── */}
       <TouchableOpacity
@@ -326,12 +264,10 @@ export default function HomeScreen({ navigation }: Props) {
       {tab === 'active' && (
         <>
           {activeTasks.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>Nothing to avoid.</Text>
-              <Text style={styles.emptySubtitle}>
-                Add a task and let the guilt begin.
-              </Text>
-            </View>
+            <EmptyState
+              title="Nothing to avoid."
+              subtitle="Add a task and let the guilt begin."
+            />
           ) : (
             <FlatList
               data={activeTasks}
@@ -355,12 +291,10 @@ export default function HomeScreen({ navigation }: Props) {
       {tab === 'history' && (
         <>
           {completedTasks.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyTitle}>No completed tasks yet.</Text>
-              <Text style={styles.emptySubtitle}>
-                Finish something first.
-              </Text>
-            </View>
+            <EmptyState
+              title="No completed tasks yet."
+              subtitle="Finish something first."
+            />
           ) : (
             <FlatList
               data={completedTasks}
@@ -385,33 +319,32 @@ export default function HomeScreen({ navigation }: Props) {
         onClose={() => setModalVisible(false)}
         onAdd={(title, estimatedMs) => addTask(title, estimatedMs)}
       />
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+const c = theme.colors;
+const sp = theme.spacing;
+const r = theme.radius;
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#0d0d0d',
-  },
   loadingRoot: {
     flex: 1,
-    backgroundColor: '#0d0d0d',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: sp.xl + sp.sm,
   },
   errorText: {
-    color: '#c0392b',
+    color: c.danger,
     fontSize: 15,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: sp.sm,
     textAlign: 'center',
   },
   errorDetail: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 20,
@@ -421,73 +354,42 @@ const styles = StyleSheet.create({
   flashBanner: {
     position: 'absolute',
     top: 60,
-    left: 20,
-    right: 20,
+    left: sp.gutter,
+    right: sp.gutter,
     zIndex: 100,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    backgroundColor: c.surface,
+    borderRadius: r.md,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingVertical: 14,
     paddingHorizontal: 18,
   },
   flashText: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
   },
 
-  // Header
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#f5f5f5',
-    letterSpacing: -0.5,
-  },
-  modeBadge: {
-    marginTop: 4,
-    alignSelf: 'flex-start',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  modeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#555',
-    letterSpacing: 1.5,
-  },
   signOutBtn: {
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    marginTop: 4,
+    paddingHorizontal: sp.md,
+    marginTop: sp.xs,
   },
   signOutText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 13,
   },
 
   // Together banner
   togetherBanner: {
-    marginHorizontal: 20,
-    marginBottom: 12,
-    backgroundColor: '#13132a',
-    borderRadius: 10,
+    marginHorizontal: sp.gutter,
+    marginBottom: sp.md,
+    backgroundColor: c.accentSurface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a4a',
-    paddingVertical: 12,
+    borderColor: c.accentSurfaceBorder,
+    paddingVertical: sp.md,
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -499,108 +401,49 @@ const styles = StyleSheet.create({
   togetherBannerLabel: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#6366f1',
+    color: c.accent,
     letterSpacing: 2,
   },
   togetherBannerText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#c7c8ff',
+    color: c.accentMuted,
   },
   togetherBannerArrow: {
     fontSize: 20,
-    color: '#6366f1',
+    color: c.accent,
     fontWeight: '300',
   },
 
   // Tabs
   tabs: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 8,
-    gap: 4,
+    paddingHorizontal: sp.gutter,
+    marginBottom: sp.sm,
+    gap: sp.xs,
   },
   tab: {
     paddingVertical: 7,
     paddingHorizontal: 14,
-    borderRadius: 8,
+    borderRadius: sp.sm,
   },
   tabActive: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: c.surface,
   },
   tabText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
     fontWeight: '500',
   },
   tabTextActive: {
-    color: '#f5f5f5',
+    color: c.text,
   },
 
   // List
   list: {
-    paddingHorizontal: 20,
+    paddingHorizontal: sp.gutter,
     paddingBottom: 100,
-    gap: 10,
-  },
-
-  // Task card
-  card: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardOverdue: {
-    borderColor: '#3d1a1a',
-  },
-  cardLeft: {
-    flex: 1,
-    marginRight: 12,
-  },
-  cardTitle: {
-    color: '#f5f5f5',
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 6,
-  },
-  cardMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  cardTimer: {
-    color: '#888',
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  cardTimerOld: {
-    color: '#c0392b',
-  },
-  cardEstimate: {
-    color: '#555',
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-  cardEstimateOver: {
-    color: '#8b2e2e',
-  },
-
-  doneBtn: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-  },
-  doneBtnText: {
-    color: '#f5f5f5',
-    fontSize: 13,
-    fontWeight: '500',
+    gap: sp.md,
   },
 
   // Completed row
@@ -610,13 +453,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: c.surface,
   },
   completedTitle: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 15,
     flex: 1,
-    marginRight: 12,
+    marginRight: sp.md,
     textDecorationLine: 'line-through',
   },
   completedRight: {
@@ -624,60 +467,39 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   completedDuration: {
-    color: '#444',
+    color: c.textDim,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },
   completedEstLabel: {
     fontSize: 10,
-    color: '#8b2e2e',
+    color: c.dangerMuted,
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   completedEstLabelBeat: {
-    color: '#2e6b3e',
-  },
-
-  // Empty state
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  emptyTitle: {
-    color: '#f5f5f5',
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    color: '#555',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
+    color: c.success,
   },
 
   // FAB
   fab: {
     position: 'absolute',
     bottom: 36,
-    right: 24,
+    right: sp.xl,
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: c.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: c.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: sp.sm,
+    elevation: sp.sm,
   },
   fabText: {
-    color: '#0d0d0d',
+    color: c.primaryText,
     fontSize: 28,
     fontWeight: '300',
     lineHeight: 32,
@@ -694,78 +516,78 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: c.backdrop,
   },
   modalSheet: {
-    backgroundColor: '#141414',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 24,
+    backgroundColor: c.surfaceRaised,
+    borderTopLeftRadius: r.xl,
+    borderTopRightRadius: r.xl,
+    paddingHorizontal: sp.xl,
     paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    paddingTop: 16,
+    paddingTop: sp.lg,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   modalHandle: {
     width: 36,
     height: 4,
-    backgroundColor: '#333',
+    backgroundColor: c.borderStrong,
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 20,
   },
   modalTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: sp.lg,
   },
   modalInput: {
-    backgroundColor: '#1a1a1a',
-    color: '#f5f5f5',
-    borderRadius: 10,
-    paddingHorizontal: 16,
+    backgroundColor: c.surface,
+    color: c.text,
+    borderRadius: r.sm,
+    paddingHorizontal: sp.lg,
     paddingVertical: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     marginBottom: 14,
     minHeight: 52,
   },
   estimateLabel: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 13,
     marginBottom: 10,
   },
   presetRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 16,
+    gap: sp.sm,
+    marginBottom: sp.lg,
   },
   presetChip: {
-    borderRadius: 8,
+    borderRadius: sp.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     paddingVertical: 7,
     paddingHorizontal: 13,
   },
   presetChipSelected: {
-    backgroundColor: '#f5f5f5',
-    borderColor: '#f5f5f5',
+    backgroundColor: c.primary,
+    borderColor: c.primary,
   },
   presetChipText: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 13,
     fontWeight: '500',
   },
   presetChipTextSelected: {
-    color: '#0d0d0d',
+    color: c.primaryText,
   },
 
   modalAddBtn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
+    backgroundColor: c.primary,
+    borderRadius: r.sm,
     paddingVertical: 15,
     alignItems: 'center',
   },
@@ -773,7 +595,7 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   modalAddBtnText: {
-    color: '#0d0d0d',
+    color: c.primaryText,
     fontSize: 16,
     fontWeight: '600',
   },

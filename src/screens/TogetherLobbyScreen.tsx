@@ -12,8 +12,13 @@ import {
   ScrollView,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import auth from '@react-native-firebase/auth';
+import { EmptyState } from '../components/layout/EmptyState';
+import { ScreenHeader } from '../components/layout/ScreenHeader';
+import { SectionTitle } from '../components/layout/SectionTitle';
+import { Screen } from '../components/ui/Screen';
+import { theme } from '../theme/themes';
+import { formatElapsed } from '../utils/formatElapsed';
 import {
   createSession,
   findActiveSessionByInviteCode,
@@ -36,20 +41,6 @@ type Mode = 'pick' | 'task-selection' | 'waiting-approval';
 type PendingCreate = { kind: 'create'; sessionId: string; durationMs: number };
 type PendingJoin   = { kind: 'join';   sessionId: string; durationMs: number; hostUsername: string };
 type Pending = PendingCreate | PendingJoin;
-
-// ─── Elapsed helper ───────────────────────────────────────────────────────────
-
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const mins = Math.floor((totalSec % 3600) / 60);
-  const secs = totalSec % 60;
-  if (days > 0) { return `${days}d ${hours}h ${mins}m`; }
-  if (hours > 0) { return `${hours}h ${mins}m ${secs}s`; }
-  if (mins > 0) { return `${mins}m ${secs}s`; }
-  return `${secs}s`;
-}
 
 // ─── Task selection screen ────────────────────────────────────────────────────
 
@@ -77,36 +68,35 @@ function TaskSelection({
   now,
 }: TaskSelectionProps) {
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-          <Text style={styles.backBtnText}>← Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitleGroup}>
-          <Text style={styles.headerTitle}>Together</Text>
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>{subtitle}</Text>
-          </View>
-        </View>
-      </View>
+    <Screen safeArea edges={['top', 'bottom']}>
+      <ScreenHeader
+        leading={
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backBtnText}>← Back</Text>
+          </TouchableOpacity>
+        }
+        title="Together"
+        badge={{ text: subtitle, variant: 'accent' }}
+      />
 
       <View style={styles.selectionContainer}>
-        <Text style={styles.selectionTitle}>Bring tasks into the session</Text>
-        <Text style={styles.selectionSubtitle}>
-          Pick up to 6 tasks from your Solo list. Anything you don't complete stays in Solo.
-        </Text>
+        <SectionTitle
+          title="Bring tasks into the session"
+          subtitle="Pick up to 6 tasks from your Solo list. Anything you don't complete stays in Solo."
+          titleStyle={styles.selectionSectionTitle}
+          subtitleStyle={styles.selectionSectionSubtitle}
+        />
 
         {tasksLoading && (
-          <ActivityIndicator color="#f5f5f5" style={styles.selectionLoader} />
+          <ActivityIndicator color={theme.colors.text} style={styles.selectionLoader} />
         )}
 
         {!tasksLoading && activeTasks.length === 0 && (
-          <View style={styles.selectionEmpty}>
-            <Text style={styles.selectionEmptyText}>No active Solo tasks yet.</Text>
-            <Text style={styles.selectionEmptyHint}>
-              You can still add tasks once the session starts.
-            </Text>
-          </View>
+          <EmptyState
+            title="No active Solo tasks yet."
+            subtitle="You can still add tasks once the session starts."
+            style={styles.selectionEmpty}
+          />
         )}
 
         {!tasksLoading && activeTasks.length > 0 && (
@@ -150,7 +140,7 @@ function TaskSelection({
           onPress={onConfirm}
           disabled={confirming}>
           {confirming
-            ? <ActivityIndicator color="#0d0d0d" />
+            ? <ActivityIndicator color={theme.colors.primaryText} />
             : (
               <Text style={styles.actionBtnText}>
                 {selectedIds.size > 0
@@ -160,7 +150,7 @@ function TaskSelection({
             )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
@@ -193,7 +183,7 @@ function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
         onPress={onJoin}
         disabled={joining}>
         {joining
-          ? <ActivityIndicator color="#6366f1" size="small" />
+          ? <ActivityIndicator color={theme.colors.accent} size="small" />
           : <Text style={styles.joinPartnerBtnText}>Join</Text>}
       </TouchableOpacity>
     </View>
@@ -345,7 +335,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         Alert.alert('No active session', `${partner.username} isn't in a session right now.`);
         return;
       }
-      const { findActiveSessionByInviteCode: findByCode } = await import('../services/sessionService');
       const sessionDoc = await import('@react-native-firebase/firestore').then(m =>
         m.default().collection('sessions').doc(partnerProfile.activeSessionId!).get(),
       );
@@ -396,10 +385,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
 
   function handleWithdrawRequest() {
     if (joinRequestId && joinRequestSessionId) {
-      import('../services/sessionService').then(({ denyJoinRequest }) => {
-        // Reuse deny to mark the request as denied (withdraw = self-deny)
-        // Actually just delete it
-      });
       import('@react-native-firebase/firestore').then(m => {
         m.default()
           .collection('sessions')
@@ -424,15 +409,11 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   if (mode === 'waiting-approval' && pending && pending.kind === 'join') {
     const dotOpacity = dotAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] });
     return (
-      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <View style={styles.headerTitleGroup}>
-            <Text style={styles.headerTitle}>Together</Text>
-            <View style={styles.modeBadge}>
-              <Text style={styles.modeBadgeText}>WAITING</Text>
-            </View>
-          </View>
-        </View>
+      <Screen safeArea edges={['top', 'bottom']}>
+        <ScreenHeader
+          title="Together"
+          badge={{ text: 'WAITING', variant: 'accent' }}
+        />
         <View style={styles.waitingContainer}>
           <View style={styles.waitingCard}>
             <Animated.View style={[styles.waitingDot, { opacity: dotOpacity }]} />
@@ -447,7 +428,7 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             <Text style={styles.withdrawBtnText}>Cancel request</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </Screen>
     );
   }
 
@@ -473,18 +454,16 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   const partners = userProfile?.partners ?? [];
 
   return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Text style={styles.backBtnText}>← Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitleGroup}>
-          <Text style={styles.headerTitle}>Together</Text>
-          <View style={styles.modeBadge}>
-            <Text style={styles.modeBadgeText}>TOGETHER</Text>
-          </View>
-        </View>
-      </View>
+    <Screen safeArea edges={['top', 'bottom']}>
+      <ScreenHeader
+        leading={
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={styles.backBtnText}>← Back</Text>
+          </TouchableOpacity>
+        }
+        title="Together"
+        badge={{ text: 'TOGETHER', variant: 'accent' }}
+      />
 
       <ScrollView
         style={styles.scroll}
@@ -505,10 +484,10 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
 
         {/* ── Host a session ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Start a session</Text>
-          <Text style={styles.sectionSubtitle}>
-            Pick a duration. Your session starts immediately.
-          </Text>
+          <SectionTitle
+            title="Start a session"
+            subtitle="Pick a duration. Your session starts immediately."
+          />
           <View style={styles.presetRow}>
             {SESSION_DURATION_PRESETS.map(p => (
               <TouchableOpacity
@@ -533,7 +512,7 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             onPress={handleHost}
             disabled={loading}>
             {loading
-              ? <ActivityIndicator color="#0d0d0d" />
+              ? <ActivityIndicator color={theme.colors.primaryText} />
               : <Text style={styles.actionBtnText}>Start session</Text>}
           </TouchableOpacity>
         </View>
@@ -546,14 +525,14 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
 
         {/* ── Join by code ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Enter a code</Text>
-          <Text style={styles.sectionSubtitle}>
-            Type your partner's 6-character invite code.
-          </Text>
+          <SectionTitle
+            title="Enter a code"
+            subtitle="Type your partner's 6-character invite code."
+          />
           <TextInput
             style={styles.codeInput}
             placeholder="e.g. ABC123"
-            placeholderTextColor="#444"
+            placeholderTextColor={theme.colors.textDim}
             value={joinCode}
             onChangeText={v => setJoinCode(v.toUpperCase())}
             autoCapitalize="characters"
@@ -584,10 +563,10 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             </View>
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Recent partners</Text>
-              <Text style={styles.sectionSubtitle}>
-                Tap to jump straight into their active session.
-              </Text>
+              <SectionTitle
+                title="Recent partners"
+                subtitle="Tap to jump straight into their active session."
+              />
               {partners.map(p => (
                 <PartnerRow
                   key={p.userId}
@@ -600,73 +579,40 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </Screen>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
+const c = theme.colors;
+const sp = theme.spacing;
+const r = theme.radius;
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#0d0d0d',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 8,
-    gap: 12,
-  },
   backBtn: {
-    paddingVertical: 4,
-    marginTop: 4,
+    paddingVertical: sp.xs,
+    marginTop: sp.xs,
   },
   backBtnText: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
-  },
-  headerTitleGroup: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#f5f5f5',
-    letterSpacing: -0.5,
-  },
-  modeBadge: {
-    marginTop: 4,
-    alignSelf: 'flex-start',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  modeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#6366f1',
-    letterSpacing: 1.5,
   },
 
   scroll: { flex: 1 },
   scrollContent: {
-    paddingHorizontal: 20,
+    paddingHorizontal: sp.gutter,
     paddingBottom: 40,
     gap: 0,
   },
 
   // Your invite code card
   yourCodeCard: {
-    backgroundColor: '#13132a',
-    borderRadius: 16,
+    backgroundColor: c.accentSurface,
+    borderRadius: r.lg,
     borderWidth: 1,
-    borderColor: '#2a2a4a',
-    padding: 24,
+    borderColor: c.accentSurfaceBorder,
+    padding: sp.xl,
     alignItems: 'center',
     gap: 6,
     marginBottom: 28,
@@ -674,110 +620,100 @@ const styles = StyleSheet.create({
   yourCodeLabel: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#6366f1',
+    color: c.accent,
     letterSpacing: 2,
   },
   yourCode: {
     fontSize: 40,
     fontWeight: '700',
-    color: '#f5f5f5',
+    color: c.text,
     letterSpacing: 8,
     fontVariant: ['tabular-nums'],
   },
   yourCodeHint: {
     fontSize: 13,
-    color: '#555',
+    color: c.textSoft,
     marginTop: 2,
   },
 
   section: {
-    gap: 10,
-    marginBottom: 8,
-  },
-  sectionTitle: {
-    color: '#f5f5f5',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  sectionSubtitle: {
-    color: '#555',
-    fontSize: 14,
-    lineHeight: 20,
+    gap: sp.md,
+    marginBottom: sp.sm,
   },
   presetRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 4,
+    gap: sp.sm,
+    marginTop: sp.xs,
   },
   presetChip: {
-    borderRadius: 8,
+    borderRadius: sp.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    borderColor: c.border,
+    paddingVertical: sp.sm,
+    paddingHorizontal: sp.lg,
   },
   presetChipSelected: {
-    backgroundColor: '#6366f1',
-    borderColor: '#6366f1',
+    backgroundColor: c.accent,
+    borderColor: c.accent,
   },
   presetChipText: {
-    color: '#888',
+    color: c.textMuted,
     fontSize: 14,
     fontWeight: '500',
   },
   presetChipTextSelected: {
-    color: '#fff',
+    color: c.onAccent,
   },
   actionBtn: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 10,
+    backgroundColor: c.primary,
+    borderRadius: r.sm,
     paddingVertical: 15,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: sp.xs,
   },
   actionBtnSecondary: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
   },
   actionBtnDisabled: {
     opacity: 0.35,
   },
   actionBtnText: {
-    color: '#0d0d0d',
+    color: c.primaryText,
     fontSize: 15,
     fontWeight: '600',
   },
   actionBtnTextSecondary: {
-    color: '#f5f5f5',
+    color: c.text,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 24,
-    gap: 12,
+    marginVertical: sp.xl,
+    gap: sp.md,
   },
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: c.surface,
   },
   dividerText: {
-    color: '#333',
+    color: c.textFaint,
     fontSize: 13,
   },
   codeInput: {
-    backgroundColor: '#1a1a1a',
-    color: '#f5f5f5',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: Platform.OS === 'ios' ? 14 : 12,
+    backgroundColor: c.surface,
+    color: c.text,
+    borderRadius: r.sm,
+    paddingHorizontal: sp.lg,
+    paddingVertical: Platform.OS === 'ios' ? 14 : sp.md,
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: 6,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     textAlign: 'center',
   },
 
@@ -785,32 +721,32 @@ const styles = StyleSheet.create({
   partnerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     padding: 14,
-    gap: 12,
+    gap: sp.md,
   },
   partnerInfo: {
     flex: 1,
     gap: 3,
   },
   partnerName: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '600',
   },
   partnerMeta: {
-    color: '#444',
+    color: c.textDim,
     fontSize: 12,
   },
   joinPartnerBtn: {
-    borderRadius: 8,
+    borderRadius: sp.sm,
     borderWidth: 1,
-    borderColor: '#6366f1',
+    borderColor: c.accent,
     paddingVertical: 7,
-    paddingHorizontal: 16,
+    paddingHorizontal: sp.lg,
     minWidth: 60,
     alignItems: 'center',
   },
@@ -818,7 +754,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   joinPartnerBtnText: {
-    color: '#6366f1',
+    color: c.accent,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -826,15 +762,15 @@ const styles = StyleSheet.create({
   // Waiting for approval
   waitingContainer: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: sp.gutter,
     paddingTop: 40,
     gap: 20,
   },
   waitingCard: {
-    backgroundColor: '#13132a',
-    borderRadius: 16,
+    backgroundColor: c.accentSurface,
+    borderRadius: r.lg,
     borderWidth: 1,
-    borderColor: '#2a2a4a',
+    borderColor: c.accentSurfaceBorder,
     padding: 28,
     alignItems: 'center',
     gap: 14,
@@ -843,17 +779,17 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#6366f1',
+    backgroundColor: c.accent,
   },
   waitingTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 18,
     fontWeight: '600',
     textAlign: 'center',
     lineHeight: 26,
   },
   waitingSubtitle: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 20,
@@ -863,26 +799,21 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   withdrawBtnText: {
-    color: '#333',
+    color: c.textFaint,
     fontSize: 14,
   },
 
   // Task selection (inline view)
   selectionContainer: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 4,
+    paddingHorizontal: sp.gutter,
+    paddingTop: sp.xs,
   },
-  selectionTitle: {
-    color: '#f5f5f5',
+  selectionSectionTitle: {
     fontSize: 20,
     fontWeight: '600',
-    marginBottom: 8,
   },
-  selectionSubtitle: {
-    color: '#555',
-    fontSize: 14,
-    lineHeight: 20,
+  selectionSectionSubtitle: {
     marginBottom: 20,
   },
   selectionLoader: {
@@ -890,41 +821,26 @@ const styles = StyleSheet.create({
   },
   selectionEmpty: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    gap: 8,
     marginBottom: 60,
-  },
-  selectionEmptyText: {
-    color: '#f5f5f5',
-    fontSize: 16,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  selectionEmptyHint: {
-    color: '#444',
-    fontSize: 14,
-    textAlign: 'center',
   },
   selectionList: {
     flex: 1,
-    marginBottom: 16,
+    marginBottom: sp.lg,
   },
   selectionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: c.border,
     padding: 14,
-    marginBottom: 8,
-    gap: 12,
+    marginBottom: sp.sm,
+    gap: sp.md,
   },
   selectionRowChecked: {
-    borderColor: '#6366f1',
-    backgroundColor: '#13132a',
+    borderColor: c.accent,
+    backgroundColor: c.accentSurface,
   },
   selectionRowDisabled: {
     opacity: 0.4,
@@ -934,17 +850,17 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 6,
     borderWidth: 1.5,
-    borderColor: '#333',
+    borderColor: c.borderStrong,
     justifyContent: 'center',
     alignItems: 'center',
     flexShrink: 0,
   },
   checkboxChecked: {
-    backgroundColor: '#6366f1',
-    borderColor: '#6366f1',
+    backgroundColor: c.accent,
+    borderColor: c.accent,
   },
   checkmark: {
-    color: '#fff',
+    color: c.onAccent,
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 15,
@@ -954,15 +870,15 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   selectionTaskTitle: {
-    color: '#f5f5f5',
+    color: c.text,
     fontSize: 15,
     fontWeight: '500',
   },
   selectionTaskTitleDim: {
-    color: '#444',
+    color: c.textDim,
   },
   selectionTaskTimer: {
-    color: '#555',
+    color: c.textSoft,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },
