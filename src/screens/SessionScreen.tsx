@@ -324,9 +324,10 @@ type ExtendOverlayProps = {
   onExtend: (ms: number) => Promise<void>;
   onCustomExtend: (minutes: number) => Promise<void>;
   onEnd: () => Promise<void>;
+  onLeave?: () => void;
 };
 
-function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd }: ExtendOverlayProps) {
+function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLeave }: ExtendOverlayProps) {
   const [busy, setBusy] = useState(false);
   const [customModalVisible, setCustomModalVisible] = useState(false);
   const [customInput, setCustomInput] = useState('');
@@ -441,9 +442,25 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd }: Ex
             </Modal>
           </>
         ) : (
-          <Text style={styles.extendSubtitle}>
-            Waiting for {hostName} to extend or end the session…
-          </Text>
+          <>
+            <Text style={styles.extendSubtitle}>
+              Waiting for {hostName} to extend or end the session…
+            </Text>
+            <TouchableOpacity
+              style={styles.extendEndBtn}
+              onPress={() =>
+                Alert.alert(
+                  'Leave session?',
+                  'You can rejoin later if the session is still active.',
+                  [
+                    { text: 'Stay', style: 'cancel' },
+                    { text: 'Leave', style: 'destructive', onPress: onLeave },
+                  ],
+                )
+              }>
+              <Text style={styles.extendEndBtnText}>Leave session</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </View>
@@ -1058,6 +1075,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           onExtend={extendSession}
           onCustomExtend={async minutes => extendSession(minutes * 60 * 1000)}
           onEnd={endSession}
+          onLeave={isHost ? undefined : handleLeave}
         />
       )}
 
