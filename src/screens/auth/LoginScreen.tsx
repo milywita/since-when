@@ -13,11 +13,13 @@ import type { AuthScreenProps } from '../../navigation/types';
 import { Screen } from '../../components/ui/Screen';
 import { AppButton } from '../../components/ui/AppButton';
 import { AppInput } from '../../components/ui/AppInput';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 type Props = AuthScreenProps<'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
+  const thm = useTheme();
+  const { colors: c, spacing: sp, typography: t } = thm;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,8 +33,7 @@ export default function LoginScreen({ navigation }: Props) {
     try {
       await auth().signInWithEmailAndPassword(email.trim(), password);
     } catch (error: any) {
-      const message = friendlyError(error.code);
-      Alert.alert('Login failed', message);
+      Alert.alert('Login failed', friendlyError(error.code));
     } finally {
       setLoading(false);
     }
@@ -43,9 +44,9 @@ export default function LoginScreen({ navigation }: Props) {
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.inner}>
-          <Text style={theme.typography.title}>Since When</Text>
-          <Text style={[theme.typography.subtitle, styles.subtitleSpacing]}>
+        <View style={[styles.inner, { paddingHorizontal: sp.xxl }]}>
+          <Text style={t.title}>Since When</Text>
+          <Text style={[t.subtitle, { marginBottom: sp.xl + sp.lg }]}>
             Sign in to confront your avoidance.
           </Text>
 
@@ -65,26 +66,22 @@ export default function LoginScreen({ navigation }: Props) {
             onChangeText={setPassword}
           />
 
-          <AppButton
-            title="Sign In"
-            onPress={handleLogin}
-            loading={loading}
-          />
+          <AppButton title="Sign In" onPress={handleLogin} loading={loading} />
 
           <TouchableOpacity
             onPress={() => navigation.navigate('ForgotPassword')}
-            style={styles.link}>
-            <Text style={theme.typography.small}>Forgot password?</Text>
+            style={[styles.link, { paddingVertical: sp.sm }]}>
+            <Text style={t.small}>Forgot password?</Text>
           </TouchableOpacity>
 
-          <View style={styles.divider} />
+          <View style={[styles.divider, { backgroundColor: c.surfaceSoft, marginVertical: sp.sm }]} />
 
           <TouchableOpacity
             onPress={() => navigation.navigate('Register')}
-            style={styles.link}>
-            <Text style={theme.typography.small}>
+            style={[styles.link, { paddingVertical: sp.sm }]}>
+            <Text style={t.small}>
               No account yet?{' '}
-              <Text style={styles.linkTextBold}>Create one</Text>
+              <Text style={{ color: c.text, fontWeight: '600' }}>Create one</Text>
             </Text>
           </TouchableOpacity>
         </View>
@@ -95,44 +92,19 @@ export default function LoginScreen({ navigation }: Props) {
 
 function friendlyError(code: string): string {
   switch (code) {
-    case 'auth/invalid-email':
-      return 'That email address is not valid.';
+    case 'auth/invalid-email': return 'That email address is not valid.';
     case 'auth/user-not-found':
     case 'auth/wrong-password':
-    case 'auth/invalid-credential':
-      return 'Incorrect email or password.';
-    case 'auth/user-disabled':
-      return 'This account has been disabled.';
-    case 'auth/too-many-requests':
-      return 'Too many failed attempts. Try again later.';
-    default:
-      return 'Something went wrong. Please try again.';
+    case 'auth/invalid-credential': return 'Incorrect email or password.';
+    case 'auth/user-disabled': return 'This account has been disabled.';
+    case 'auth/too-many-requests': return 'Too many failed attempts. Try again later.';
+    default: return 'Something went wrong. Please try again.';
   }
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
-  inner: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.xxl,
-  },
-  subtitleSpacing: {
-    marginBottom: theme.spacing.xl + theme.spacing.lg,
-  },
-  link: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-  },
-  linkTextBold: {
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: theme.colors.surfaceSoft,
-    marginVertical: theme.spacing.sm,
-  },
+  flex: { flex: 1 },
+  inner: { flex: 1, justifyContent: 'center' },
+  link: { alignItems: 'center' },
+  divider: { height: 1 },
 });

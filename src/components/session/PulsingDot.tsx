@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet } from 'react-native';
-import { theme } from '../../theme/themes';
+import { Animated } from 'react-native';
+import { useTheme } from '../../theme/ThemeContext';
 
 export function PulsingDot() {
+  const { colors: c, spacing: sp } = useTheme();
   const scale = useRef(new Animated.Value(1)).current;
   const opacity = useRef(new Animated.Value(1)).current;
 
@@ -25,19 +26,15 @@ export function PulsingDot() {
 
   return (
     <Animated.View
-      style={[styles.dot, { transform: [{ scale }], opacity }]}
+      style={[
+        {
+          width: sp.sm,
+          height: sp.sm,
+          borderRadius: sp.xs,
+          backgroundColor: c.accent,
+        },
+        { transform: [{ scale }], opacity },
+      ]}
     />
   );
 }
-
-const c = theme.colors;
-const sp = theme.spacing;
-
-const styles = StyleSheet.create({
-  dot: {
-    width: sp.sm,
-    height: sp.sm,
-    borderRadius: sp.xs,
-    backgroundColor: c.accent,
-  },
-});

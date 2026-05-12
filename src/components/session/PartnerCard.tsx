@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import type { SessionMember, SessionTask, Reaction } from '../../types/Session';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 import { formatElapsed } from '../../utils/formatElapsed';
 import { PulsingDot } from './PulsingDot';
 import { ReactionButton } from './ReactionButton';
@@ -11,7 +11,6 @@ export type PartnerCardProps = {
   member: SessionMember;
   now: number;
   recentReactions: Reaction[];
-  /** `completed` selects celebration vs in-progress reaction phrases in the session picker. */
   onReact: (taskId: string, completed: boolean) => void;
 };
 
@@ -21,39 +20,59 @@ export function PartnerCard({
   recentReactions,
   onReact,
 }: PartnerCardProps) {
+  const { colors: c, spacing: sp, radius: r } = useTheme();
   const activeTask = member.tasks.find(
     t => t.taskId === member.activeTaskId && !t.completedAt,
   );
   const otherTasks = member.tasks.filter(t => t.taskId !== member.activeTaskId);
 
   return (
-    <View style={styles.partnerCard}>
-      <View style={styles.partnerHeader}>
-        <View style={styles.partnerOnlineDot} />
-        <Text style={styles.partnerName}>{member.displayName}</Text>
-        <Text style={styles.partnerTaskCount}>
+    <View
+      style={[
+        styles.partnerCard,
+        {
+          backgroundColor: c.surfaceInset,
+          borderRadius: r.md,
+          borderColor: c.surfaceSoft,
+          gap: sp.sm,
+        },
+      ]}>
+      <View style={[styles.partnerHeader, { gap: sp.sm }]}>
+        <View style={[styles.partnerOnlineDot, { backgroundColor: c.success }]} />
+        <Text style={[styles.partnerName, { color: c.text }]}>{member.displayName}</Text>
+        <Text style={[styles.partnerTaskCount, { color: c.textFaint }]}>
           {member.tasks.filter(t => !t.completedAt).length} active
         </Text>
       </View>
 
       {member.tasks.length === 0 && (
-        <Text style={styles.partnerEmpty}>No tasks added yet.</Text>
+        <Text style={[styles.partnerEmpty, { color: c.textFaint }]}>No tasks added yet.</Text>
       )}
 
       {activeTask && (
-        <View style={styles.partnerFocusTask}>
+        <View
+          style={[
+            styles.partnerFocusTask,
+            {
+              backgroundColor: c.accentSurface,
+              borderRadius: r.sm,
+              borderColor: c.accentSurfaceBorder,
+              padding: sp.md,
+              gap: sp.xs,
+            },
+          ]}>
           <View style={styles.partnerFocusHeader}>
             <PulsingDot />
-            <Text style={styles.partnerFocusLabel}>FOCUS</Text>
+            <Text style={[styles.partnerFocusLabel, { color: c.accent }]}>FOCUS</Text>
           </View>
-          <Text style={styles.partnerFocusTitle} numberOfLines={2}>
+          <Text style={[styles.partnerFocusTitle, { color: c.text }]} numberOfLines={2}>
             {activeTask.title}
           </Text>
           <View style={styles.partnerFocusMeta}>
             <Text
               style={[
                 styles.partnerFocusTimer,
-                now - activeTask.createdAt > 86400 * 1000 && styles.partnerTaskTimerOld,
+                { color: now - activeTask.createdAt > 86400 * 1000 ? c.dangerMuted : c.accentLight },
               ]}>
               {formatElapsed(now - activeTask.createdAt)}
             </Text>
@@ -61,13 +80,15 @@ export function PartnerCard({
               <Text
                 style={[
                   styles.partnerEstimate,
-                  now - activeTask.createdAt > activeTask.estimatedMs &&
-                    styles.partnerEstimateOver,
+                  {
+                    color:
+                      now - activeTask.createdAt > activeTask.estimatedMs
+                        ? c.danger
+                        : c.textMuted,
+                  },
                 ]}>
                 {now - activeTask.createdAt > activeTask.estimatedMs
-                  ? `over by ${formatElapsed(
-                      (now - activeTask.createdAt) - activeTask.estimatedMs,
-                    )}`
+                  ? `over by ${formatElapsed((now - activeTask.createdAt) - activeTask.estimatedMs)}`
                   : `est. ${formatElapsed(activeTask.estimatedMs)}`}
               </Text>
             )}
@@ -77,7 +98,7 @@ export function PartnerCard({
             />
           </View>
           <TaskReactions
-            reactions={recentReactions.filter(r => r.taskId === activeTask.taskId)}
+            reactions={recentReactions.filter(rx => rx.taskId === activeTask.taskId)}
             now={now}
           />
         </View>
@@ -86,8 +107,7 @@ export function PartnerCard({
       {otherTasks.map(task => {
         const elapsed = now - task.createdAt;
         const isDone = task.completedAt !== null;
-        const taskReactions = recentReactions.filter(r => r.taskId === task.taskId);
-
+        const taskReactions = recentReactions.filter(rx => rx.taskId === task.taskId);
         return (
           <PartnerTaskRow
             key={task.taskId}
@@ -121,11 +141,24 @@ function PartnerTaskRow({
   now,
   onReact,
 }: PartnerTaskRowProps) {
+  const { colors: c, spacing: sp } = useTheme();
   return (
-    <View style={[styles.partnerTask, isDone && styles.partnerTaskDone]}>
-      <View style={styles.partnerTaskLeft}>
+    <View
+      style={[
+        styles.partnerTask,
+        {
+          backgroundColor: c.surface,
+          borderColor: c.borderInner,
+          gap: sp.sm,
+          opacity: isDone ? 0.4 : 1,
+        },
+      ]}>
+      <View style={[styles.partnerTaskLeft, { gap: 3 }]}>
         <Text
-          style={[styles.partnerTaskTitle, isDone && styles.partnerTaskTitleDone]}
+          style={[
+            styles.partnerTaskTitle,
+            { color: isDone ? c.textDim : c.text, textDecorationLine: isDone ? 'line-through' : 'none' },
+          ]}
           numberOfLines={2}>
           {task.title}
         </Text>
@@ -133,7 +166,7 @@ function PartnerTaskRow({
           <Text
             style={[
               styles.partnerTaskTimer,
-              elapsed > 86400 * 1000 && styles.partnerTaskTimerOld,
+              { color: elapsed > 86400 * 1000 ? c.dangerMuted : c.textSecondary },
             ]}>
             {formatElapsed(elapsed)}
           </Text>
@@ -142,7 +175,7 @@ function PartnerTaskRow({
           <Text
             style={[
               styles.partnerEstimate,
-              elapsed > task.estimatedMs && styles.partnerEstimateOver,
+              { color: elapsed > task.estimatedMs ? c.danger : c.textMuted },
             ]}>
             {elapsed > task.estimatedMs
               ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
@@ -150,7 +183,7 @@ function PartnerTaskRow({
           </Text>
         )}
         {isDone && (
-          <Text style={styles.partnerTaskDoneLabel}>
+          <Text style={[styles.partnerTaskDoneLabel, { color: c.success }]}>
             Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
@@ -164,104 +197,34 @@ function PartnerTaskRow({
   );
 }
 
-const c = theme.colors;
-const sp = theme.spacing;
-const r = theme.radius;
-
 const styles = StyleSheet.create({
-  partnerCard: {
-    backgroundColor: c.surfaceInset,
-    borderRadius: r.md,
-    borderWidth: 1,
-    borderColor: c.surfaceSoft,
-    padding: 14,
-    gap: sp.sm,
-  },
-  partnerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: sp.sm,
-  },
-  partnerOnlineDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: c.success,
-  },
-  partnerName: {
-    color: c.text,
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-  },
-  partnerTaskCount: { color: c.textFaint, fontSize: 12 },
-  partnerEmpty: { color: c.textFaint, fontSize: 13 },
-
-  partnerFocusTask: {
-    backgroundColor: c.accentSurface,
-    borderRadius: r.sm,
-    borderWidth: 1,
-    borderColor: c.accentSurfaceBorder,
-    padding: sp.md,
-    gap: sp.xs,
-  },
-  partnerFocusHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  partnerFocusLabel: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: c.accent,
-    letterSpacing: 1.5,
-  },
-  partnerFocusTitle: {
-    color: c.text,
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  partnerCard: { borderWidth: 1, padding: 14 },
+  partnerHeader: { flexDirection: 'row', alignItems: 'center' },
+  partnerOnlineDot: { width: 7, height: 7, borderRadius: 4 },
+  partnerName: { fontSize: 15, fontWeight: '600', flex: 1 },
+  partnerTaskCount: { fontSize: 12 },
+  partnerEmpty: { fontSize: 13 },
+  partnerFocusTask: { borderWidth: 1 },
+  partnerFocusHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  partnerFocusLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
+  partnerFocusTitle: { fontSize: 15, fontWeight: '500' },
   partnerFocusMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 2,
   },
-  partnerFocusTimer: {
-    color: c.accentLight,
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  partnerTaskTimerOld: { color: c.dangerMuted },
-
+  partnerFocusTimer: { fontSize: 13, fontVariant: ['tabular-nums'] },
   partnerTask: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    borderRadius: sp.sm,
-    backgroundColor: c.surface,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: c.borderInner,
     padding: 10,
-    gap: sp.sm,
   },
-  partnerTaskDone: { opacity: 0.4 },
-  partnerTaskLeft: { flex: 1, gap: 3 },
-  partnerTaskTitle: {
-    color: c.text,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  partnerTaskTitleDone: {
-    textDecorationLine: 'line-through',
-    color: c.textDim,
-  },
-  partnerTaskTimer: {
-    color: c.textSecondary,
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-  partnerTaskDoneLabel: { color: c.success, fontSize: 12 },
-  partnerEstimate: { color: c.textMuted, fontSize: 11 },
-  partnerEstimateOver: { color: c.danger },
+  partnerTaskLeft: { flex: 1 },
+  partnerTaskTitle: { fontSize: 14, fontWeight: '500' },
+  partnerTaskTimer: { fontSize: 12, fontVariant: ['tabular-nums'] },
+  partnerTaskDoneLabel: { fontSize: 12 },
+  partnerEstimate: { fontSize: 11 },
 });

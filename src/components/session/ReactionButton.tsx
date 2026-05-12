@@ -6,7 +6,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type ReactionButtonVariant = 'default' | 'focus';
 
@@ -27,43 +27,27 @@ export function ReactionButton({
   hitSlop = 8,
   style,
 }: ReactionButtonProps) {
+  const { colors: c, spacing: sp } = useTheme();
   const isFocus = variant === 'focus';
+
   return (
     <TouchableOpacity
-      style={[isFocus ? styles.focus : styles.default, style]}
+      style={[
+        styles.base,
+        isFocus
+          ? { borderColor: c.accentSurfaceBorder, paddingHorizontal: 10, paddingVertical: sp.xs }
+          : { borderColor: c.border, paddingHorizontal: 10, paddingVertical: 5, marginTop: 2 },
+        style,
+      ]}
       onPress={onPress}
       disabled={disabled}
       hitSlop={hitSlop}>
-      <Text style={isFocus ? styles.textFocus : styles.textDefault}>{label}</Text>
+      <Text style={[styles.text, { color: isFocus ? c.accent : c.textSoft }]}>{label}</Text>
     </TouchableOpacity>
   );
 }
 
-const c = theme.colors;
-const sp = theme.spacing;
-
 const styles = StyleSheet.create({
-  default: {
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    marginTop: 2,
-  },
-  textDefault: {
-    color: c.textSoft,
-    fontSize: 12,
-  },
-  focus: {
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: c.accentSurfaceBorder,
-    paddingVertical: sp.xs,
-    paddingHorizontal: 10,
-  },
-  textFocus: {
-    color: c.accent,
-    fontSize: 12,
-  },
+  base: { borderRadius: 6, borderWidth: 1 },
+  text: { fontSize: 12 },
 });

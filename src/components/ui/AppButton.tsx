@@ -9,7 +9,7 @@ import {
   type TouchableOpacityProps,
   type ViewStyle,
 } from 'react-native';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type AppButtonProps = Omit<
   TouchableOpacityProps,
@@ -17,50 +17,50 @@ export type AppButtonProps = Omit<
 > & {
   title: string;
   loading?: boolean;
-  /** Merged after base button styles. */
   style?: StyleProp<ViewStyle>;
   textStyle?: TextStyle;
   indicatorColor?: string;
 };
 
-/**
- * Primary filled button matching auth CTAs (light fill on dark background).
- */
 export function AppButton({
   title,
   loading,
   disabled,
   style,
   textStyle,
-  indicatorColor = theme.colors.primaryText,
+  indicatorColor,
   ...rest
 }: AppButtonProps) {
+  const { colors: c, radius: r, spacing: sp } = useTheme();
+  const resolvedIndicator = indicatorColor ?? c.primaryText;
+
   return (
     <TouchableOpacity
-      style={[styles.button, style]}
+      style={[
+        {
+          backgroundColor: c.primary,
+          borderRadius: r.sm,
+          paddingVertical: 15,
+          alignItems: 'center' as const,
+          marginTop: sp.xs,
+          marginBottom: sp.lg,
+        },
+        style,
+      ]}
       disabled={disabled || loading}
       {...rest}>
       {loading ? (
-        <ActivityIndicator color={indicatorColor} />
+        <ActivityIndicator color={resolvedIndicator} />
       ) : (
-        <Text style={[styles.label, textStyle]}>{title}</Text>
+        <Text style={[{ color: c.primaryText, fontSize: 16, fontWeight: '600' as const }, textStyle]}>
+          {title}
+        </Text>
       )}
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
-  button: {
-    backgroundColor: theme.colors.primary,
-    borderRadius: theme.radius.sm,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: theme.spacing.xs,
-    marginBottom: theme.spacing.lg,
-  },
-  label: {
-    color: theme.colors.primaryText,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+// Keep a static StyleSheet for any consumers that only need the shape (no colors).
+export const appButtonBase = StyleSheet.create({
+  button: { alignItems: 'center' },
 });

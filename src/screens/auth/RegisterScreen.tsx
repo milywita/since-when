@@ -13,11 +13,12 @@ import type { AuthScreenProps } from '../../navigation/types';
 import { Screen } from '../../components/ui/Screen';
 import { AppButton } from '../../components/ui/AppButton';
 import { AppInput } from '../../components/ui/AppInput';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 type Props = AuthScreenProps<'Register'>;
 
 export default function RegisterScreen({ navigation }: Props) {
+  const { colors: c, spacing: sp, typography: t } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -40,8 +41,7 @@ export default function RegisterScreen({ navigation }: Props) {
     try {
       await auth().createUserWithEmailAndPassword(email.trim(), password);
     } catch (error: any) {
-      const message = friendlyError(error.code);
-      Alert.alert('Registration failed', message);
+      Alert.alert('Registration failed', friendlyError(error.code));
     } finally {
       setLoading(false);
     }
@@ -53,10 +53,13 @@ export default function RegisterScreen({ navigation }: Props) {
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
-          contentContainerStyle={styles.inner}
+          contentContainerStyle={[
+            styles.inner,
+            { paddingHorizontal: sp.xxl, paddingVertical: sp.xl + sp.lg },
+          ]}
           keyboardShouldPersistTaps="handled">
-          <Text style={theme.typography.title}>Create account</Text>
-          <Text style={[theme.typography.subtitle, styles.subtitleSpacing]}>
+          <Text style={t.title}>Create account</Text>
+          <Text style={[t.subtitle, { marginBottom: sp.xl + sp.lg }]}>
             Time to start counting your avoidances.
           </Text>
 
@@ -83,18 +86,14 @@ export default function RegisterScreen({ navigation }: Props) {
             onChangeText={setConfirmPassword}
           />
 
-          <AppButton
-            title="Create Account"
-            onPress={handleRegister}
-            loading={loading}
-          />
+          <AppButton title="Create Account" onPress={handleRegister} loading={loading} />
 
           <TouchableOpacity
             onPress={() => navigation.goBack()}
-            style={styles.link}>
-            <Text style={theme.typography.small}>
+            style={[styles.link, { paddingVertical: sp.sm }]}>
+            <Text style={t.small}>
               Already have an account?{' '}
-              <Text style={styles.linkTextBold}>Sign in</Text>
+              <Text style={{ color: c.text, fontWeight: '600' }}>Sign in</Text>
             </Text>
           </TouchableOpacity>
         </ScrollView>
@@ -105,38 +104,16 @@ export default function RegisterScreen({ navigation }: Props) {
 
 function friendlyError(code: string): string {
   switch (code) {
-    case 'auth/email-already-in-use':
-      return 'That email is already registered.';
-    case 'auth/invalid-email':
-      return 'That email address is not valid.';
-    case 'auth/weak-password':
-      return 'Password must be at least 6 characters.';
-    case 'auth/too-many-requests':
-      return 'Too many attempts. Try again later.';
-    default:
-      return 'Something went wrong. Please try again.';
+    case 'auth/email-already-in-use': return 'That email is already registered.';
+    case 'auth/invalid-email': return 'That email address is not valid.';
+    case 'auth/weak-password': return 'Password must be at least 6 characters.';
+    case 'auth/too-many-requests': return 'Too many attempts. Try again later.';
+    default: return 'Something went wrong. Please try again.';
   }
 }
 
 const styles = StyleSheet.create({
-  flex: {
-    flex: 1,
-  },
-  inner: {
-    flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: theme.spacing.xxl,
-    paddingVertical: theme.spacing.xl + theme.spacing.lg,
-  },
-  subtitleSpacing: {
-    marginBottom: theme.spacing.xl + theme.spacing.lg,
-  },
-  link: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-  },
-  linkTextBold: {
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
+  flex: { flex: 1 },
+  inner: { flexGrow: 1, justifyContent: 'center' },
+  link: { alignItems: 'center' },
 });

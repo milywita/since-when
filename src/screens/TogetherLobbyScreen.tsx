@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,7 +19,8 @@ import { EmptyState } from '../components/layout/EmptyState';
 import { ScreenHeader } from '../components/layout/ScreenHeader';
 import { SectionTitle } from '../components/layout/SectionTitle';
 import { Screen } from '../components/ui/Screen';
-import { theme } from '../theme/themes';
+import { useTheme } from '../theme/ThemeContext';
+import type { AppTheme } from '../theme/themes';
 import { formatElapsed } from '../utils/formatElapsed';
 import {
   createSession,
@@ -44,7 +45,7 @@ type PendingCreate = { kind: 'create'; sessionId: string; durationMs: number };
 type PendingJoin   = { kind: 'join';   sessionId: string; durationMs: number; hostUsername: string };
 type Pending = PendingCreate | PendingJoin;
 
-// ─── Task selection screen ────────────────────────────────────────────────────
+// ─── Task selection ───────────────────────────────────────────────────────────
 
 type TaskSelectionProps = {
   activeTasks: Task[];
@@ -69,35 +70,39 @@ function TaskSelection({
   onBack,
   now,
 }: TaskSelectionProps) {
+  const thm = useTheme();
+  const s = useMemo(() => buildStyles(thm), [thm]);
+  const { colors: c } = thm;
+
   return (
     <Screen safeArea edges={['top', 'bottom']}>
       <ScreenHeader
         leading={
-          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
-            <Text style={styles.backBtnText}>← Back</Text>
+          <TouchableOpacity style={s.backBtn} onPress={onBack}>
+            <Text style={[s.backBtnText, { color: c.textSoft }]}>← Back</Text>
           </TouchableOpacity>
         }
         title="Together"
         badge={{ text: subtitle, variant: 'accent' }}
       />
 
-      <View style={styles.selectionContainer}>
+      <View style={s.selectionContainer}>
         <SectionTitle
           title="Bring tasks into the session"
           subtitle="Pick up to 6 tasks from your Solo list. Anything you don't complete stays in Solo."
-          titleStyle={styles.selectionSectionTitle}
-          subtitleStyle={styles.selectionSectionSubtitle}
+          titleStyle={s.selectionSectionTitle}
+          subtitleStyle={s.selectionSectionSubtitle}
         />
 
         {tasksLoading && (
-          <ActivityIndicator color={theme.colors.text} style={styles.selectionLoader} />
+          <ActivityIndicator color={c.text} style={s.selectionLoader} />
         )}
 
         {!tasksLoading && activeTasks.length === 0 && (
           <EmptyState
             title="No active Solo tasks yet."
             subtitle="You can still add tasks once the session starts."
-            style={styles.selectionEmpty}
+            style={s.selectionEmpty}
           />
         )}
 
@@ -105,7 +110,7 @@ function TaskSelection({
           <FlatList
             data={activeTasks}
             keyExtractor={t => t.id}
-            style={styles.selectionList}
+            style={s.selectionList}
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
               const checked = selectedIds.has(item.id);
@@ -114,22 +119,22 @@ function TaskSelection({
               return (
                 <TouchableOpacity
                   style={[
-                    styles.selectionRow,
-                    checked && styles.selectionRowChecked,
-                    atLimit && styles.selectionRowDisabled,
+                    s.selectionRow,
+                    checked && s.selectionRowChecked,
+                    atLimit && s.selectionRowDisabled,
                   ]}
                   onPress={() => !atLimit && onToggle(item.id)}
                   activeOpacity={atLimit ? 1 : 0.7}>
-                  <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-                    {checked && <Text style={styles.checkmark}>✓</Text>}
+                  <View style={[s.checkbox, checked && s.checkboxChecked]}>
+                    {checked && <Text style={s.checkmark}>✓</Text>}
                   </View>
-                  <View style={styles.selectionTaskInfo}>
+                  <View style={s.selectionTaskInfo}>
                     <Text
-                      style={[styles.selectionTaskTitle, atLimit && styles.selectionTaskTitleDim]}
+                      style={[s.selectionTaskTitle, atLimit && s.selectionTaskTitleDim]}
                       numberOfLines={2}>
                       {item.title}
                     </Text>
-                    <Text style={styles.selectionTaskTimer}>{formatElapsed(elapsed)}</Text>
+                    <Text style={s.selectionTaskTimer}>{formatElapsed(elapsed)}</Text>
                   </View>
                 </TouchableOpacity>
               );
@@ -138,13 +143,13 @@ function TaskSelection({
         )}
 
         <TouchableOpacity
-          style={[styles.actionBtn, confirming && styles.actionBtnDisabled]}
+          style={[s.actionBtn, confirming && s.actionBtnDisabled]}
           onPress={onConfirm}
           disabled={confirming}>
           {confirming
-            ? <ActivityIndicator color={theme.colors.primaryText} />
+            ? <ActivityIndicator color={c.primaryText} />
             : (
-              <Text style={styles.actionBtnText}>
+              <Text style={s.actionBtnText}>
                 {selectedIds.size > 0
                   ? `Start with ${selectedIds.size} task${selectedIds.size !== 1 ? 's' : ''}`
                   : 'Start without tasks'}
@@ -165,6 +170,9 @@ type PartnerRowProps = {
 };
 
 function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
+  const thm = useTheme();
+  const s = useMemo(() => buildStyles(thm), [thm]);
+  const { colors: c } = thm;
   const elapsed = Date.now() - partner.lastSessionAt;
   const label = elapsed < 60000
     ? 'just now'
@@ -175,18 +183,18 @@ function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
         : `${Math.floor(elapsed / 86400000)}d ago`;
 
   return (
-    <View style={styles.partnerRow}>
-      <View style={styles.partnerInfo}>
-        <Text style={styles.partnerName}>{partner.username}</Text>
-        <Text style={styles.partnerMeta}>Last session {label}</Text>
+    <View style={s.partnerRow}>
+      <View style={s.partnerInfo}>
+        <Text style={[s.partnerName, { color: c.text }]}>{partner.username}</Text>
+        <Text style={[s.partnerMeta, { color: c.textDim }]}>Last session {label}</Text>
       </View>
       <TouchableOpacity
-        style={[styles.joinPartnerBtn, joining && styles.joinPartnerBtnDisabled]}
+        style={[s.joinPartnerBtn, joining && s.joinPartnerBtnDisabled]}
         onPress={onJoin}
         disabled={joining}>
         {joining
-          ? <ActivityIndicator color={theme.colors.accent} size="small" />
-          : <Text style={styles.joinPartnerBtnText}>Join</Text>}
+          ? <ActivityIndicator color={c.accent} size="small" />
+          : <Text style={[s.joinPartnerBtnText, { color: c.accent }]}>Join</Text>}
       </TouchableOpacity>
     </View>
   );
@@ -195,10 +203,12 @@ function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function TogetherLobbyScreen({ navigation }: Props) {
+  const thm = useTheme();
+  const s = useMemo(() => buildStyles(thm), [thm]);
+  const { colors: c } = thm;
   const user = auth().currentUser!;
 
   const { activeTasks, loading: tasksLoading } = useTasks();
-
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [mode, setMode] = useState<Mode>('pick');
   const [pending, setPending] = useState<Pending | null>(null);
@@ -210,7 +220,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [joiningPartnerId, setJoiningPartnerId] = useState<string | null>(null);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  // Join request waiting state
   const [joinRequestId, setJoinRequestId] = useState<string | null>(null);
   const [joinRequestSessionId, setJoinRequestSessionId] = useState<string | null>(null);
   const dotAnim = useRef(new Animated.Value(0)).current;
@@ -226,7 +235,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     return unsub;
   }, [user.uid]);
 
-  // Pulsing dot animation for waiting screen
   useEffect(() => {
     if (mode !== 'waiting-approval') { return; }
     const loop = Animated.loop(
@@ -239,7 +247,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     return () => loop.stop();
   }, [mode, dotAnim]);
 
-  // Subscribe to join request status changes
   useEffect(() => {
     if (!joinRequestId || !joinRequestSessionId) { return; }
     const unsub = subscribeToJoinRequest(
@@ -291,7 +298,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
       }));
   }
 
-  // ── Step 1: Host ───────────────────────────────────────
   async function handleHost() {
     setLoading(true);
     try {
@@ -306,7 +312,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
-  // ── Step 1: Join by code ───────────────────────────────
   async function handleJoinFind() {
     const code = joinCode.trim();
     if (code.length < 6) {
@@ -330,7 +335,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
-  // ── Step 1: Join from partner history ─────────────────
   async function handleJoinPartner(partner: SessionPartner) {
     setJoiningPartnerId(partner.userId);
     try {
@@ -361,20 +365,17 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     }
   }
 
-  // ── Step 2: Confirm task selection ────────────────────
   async function handleConfirmTasks() {
     if (!pending) { return; }
     const tasks = buildSessionTasks();
     setConfirming(true);
     try {
       if (pending.kind === 'create') {
-        // Host: add selected tasks to their already-active session
         for (const task of tasks) {
           await addTaskToSession(pending.sessionId, user.uid, task);
         }
         navigation.replace('Session', { sessionId: pending.sessionId });
       } else {
-        // Joiner: send a join request and wait for host approval
         const reqId = await requestToJoin(pending.sessionId, user.uid, displayName, tasks);
         setJoinRequestId(reqId);
         setJoinRequestSessionId(pending.sessionId);
@@ -418,18 +419,18 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           title="Together"
           badge={{ text: 'WAITING', variant: 'accent' }}
         />
-        <View style={styles.waitingContainer}>
-          <View style={styles.waitingCard}>
-            <Animated.View style={[styles.waitingDot, { opacity: dotOpacity }]} />
-            <Text style={styles.waitingTitle}>
+        <View style={s.waitingContainer}>
+          <View style={s.waitingCard}>
+            <Animated.View style={[s.waitingDot, { opacity: dotOpacity }]} />
+            <Text style={[s.waitingTitle, { color: c.text }]}>
               Waiting for {pending.hostUsername} to let you in…
             </Text>
-            <Text style={styles.waitingSubtitle}>
+            <Text style={[s.waitingSubtitle, { color: c.textSoft }]}>
               They'll see a notification asking to approve your request.
             </Text>
           </View>
-          <TouchableOpacity style={styles.withdrawBtn} onPress={handleWithdrawRequest}>
-            <Text style={styles.withdrawBtnText}>Cancel request</Text>
+          <TouchableOpacity style={s.withdrawBtn} onPress={handleWithdrawRequest}>
+            <Text style={[s.withdrawBtnText, { color: c.textFaint }]}>Cancel request</Text>
           </TouchableOpacity>
         </View>
       </Screen>
@@ -461,8 +462,8 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     <Screen safeArea edges={['top', 'bottom']}>
       <ScreenHeader
         leading={
-          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnText}>← Back</Text>
+          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={[s.backBtnText, { color: c.textSoft }]}>← Back</Text>
           </TouchableOpacity>
         }
         title="Together"
@@ -470,13 +471,13 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
       />
 
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 
         {/* ── Host a session ── */}
-        <View style={styles.section}>
+        <View style={s.section}>
           <SectionTitle
             title="Start a session"
             subtitle="Pick a duration. Your session starts immediately."
@@ -484,27 +485,27 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           {(() => {
             const isCustom = !SESSION_DURATION_PRESETS.some(p => p.ms === selectedDurationMs);
             return (
-              <View style={styles.presetRow}>
+              <View style={s.presetRow}>
                 {SESSION_DURATION_PRESETS.map(p => (
                   <TouchableOpacity
                     key={p.ms}
                     style={[
-                      styles.presetChip,
-                      selectedDurationMs === p.ms && styles.presetChipSelected,
+                      s.presetChip,
+                      selectedDurationMs === p.ms && s.presetChipSelected,
                     ]}
                     onPress={() => setSelectedDurationMs(p.ms)}>
                     <Text style={[
-                      styles.presetChipText,
-                      selectedDurationMs === p.ms && styles.presetChipTextSelected,
+                      s.presetChipText,
+                      selectedDurationMs === p.ms && s.presetChipTextSelected,
                     ]}>
                       {p.label}
                     </Text>
                   </TouchableOpacity>
                 ))}
                 <TouchableOpacity
-                  style={[styles.presetChip, isCustom && styles.presetChipSelected]}
+                  style={[s.presetChip, isCustom && s.presetChipSelected]}
                   onPress={() => setCustomModalVisible(true)}>
-                  <Text style={[styles.presetChipText, isCustom && styles.presetChipTextSelected]}>
+                  <Text style={[s.presetChipText, isCustom && s.presetChipTextSelected]}>
                     {isCustom ? `${Math.round(selectedDurationMs / 60000)}m` : 'Custom'}
                   </Text>
                 </TouchableOpacity>
@@ -512,12 +513,12 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
             );
           })()}
           <TouchableOpacity
-            style={[styles.actionBtn, loading && styles.actionBtnDisabled]}
+            style={[s.actionBtn, loading && s.actionBtnDisabled]}
             onPress={handleHost}
             disabled={loading}>
             {loading
-              ? <ActivityIndicator color={theme.colors.primaryText} />
-              : <Text style={styles.actionBtnText}>Start session</Text>}
+              ? <ActivityIndicator color={c.primaryText} />
+              : <Text style={s.actionBtnText}>Start session</Text>}
           </TouchableOpacity>
         </View>
 
@@ -528,21 +529,21 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           animationType="slide"
           onRequestClose={() => setCustomModalVisible(false)}>
           <KeyboardAvoidingView
-            style={styles.customModalOverlay}
+            style={s.customModalOverlay}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <TouchableOpacity
-              style={styles.customModalBackdrop}
+              style={s.customModalBackdrop}
               activeOpacity={1}
               onPress={() => setCustomModalVisible(false)}
             />
-            <View style={styles.customModalSheet}>
-              <View style={styles.customModalHandle} />
-              <Text style={styles.customModalTitle}>Custom duration</Text>
-              <Text style={styles.customModalSubtitle}>How many minutes?</Text>
+            <View style={s.customModalSheet}>
+              <View style={s.customModalHandle} />
+              <Text style={[s.customModalTitle, { color: c.text }]}>Custom duration</Text>
+              <Text style={[s.customModalSubtitle, { color: c.textSoft }]}>How many minutes?</Text>
               <TextInput
-                style={styles.customModalInput}
+                style={s.customModalInput}
                 placeholder="e.g. 45"
-                placeholderTextColor="#555"
+                placeholderTextColor={c.textSoft}
                 value={customInput}
                 onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
                 keyboardType="number-pad"
@@ -551,8 +552,8 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
               />
               <TouchableOpacity
                 style={[
-                  styles.actionBtn,
-                  (!customInput || parseInt(customInput, 10) < 1) && styles.actionBtnDisabled,
+                  s.actionBtn,
+                  (!customInput || parseInt(customInput, 10) < 1) && s.actionBtnDisabled,
                 ]}
                 disabled={!customInput || parseInt(customInput, 10) < 1}
                 onPress={() => {
@@ -563,28 +564,28 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
                     setCustomInput('');
                   }
                 }}>
-                <Text style={styles.actionBtnText}>Set duration</Text>
+                <Text style={s.actionBtnText}>Set duration</Text>
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
         </Modal>
 
-        <View style={styles.divider}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or join</Text>
-          <View style={styles.dividerLine} />
+        <View style={s.divider}>
+          <View style={s.dividerLine} />
+          <Text style={[s.dividerText, { color: c.textFaint }]}>or join</Text>
+          <View style={s.dividerLine} />
         </View>
 
         {/* ── Join by code ── */}
-        <View style={styles.section}>
+        <View style={s.section}>
           <SectionTitle
             title="Enter a code"
             subtitle="Type your partner's 6-character invite code."
           />
           <TextInput
-            style={styles.codeInput}
+            style={s.codeInput}
             placeholder="e.g. ABC123"
-            placeholderTextColor={theme.colors.textDim}
+            placeholderTextColor={c.textDim}
             value={joinCode}
             onChangeText={v => setJoinCode(v.toUpperCase())}
             autoCapitalize="characters"
@@ -593,13 +594,13 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           />
           <TouchableOpacity
             style={[
-              styles.actionBtn,
-              styles.actionBtnSecondary,
-              (loading || joinCode.trim().length < 6) && styles.actionBtnDisabled,
+              s.actionBtn,
+              s.actionBtnSecondary,
+              (loading || joinCode.trim().length < 6) && s.actionBtnDisabled,
             ]}
             onPress={handleJoinFind}
             disabled={loading || joinCode.trim().length < 6}>
-            <Text style={[styles.actionBtnText, styles.actionBtnTextSecondary]}>
+            <Text style={[s.actionBtnText, s.actionBtnTextSecondary]}>
               Find session
             </Text>
           </TouchableOpacity>
@@ -608,13 +609,13 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         {/* ── Partner history ── */}
         {partners.length > 0 && (
           <>
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or pick someone</Text>
-              <View style={styles.dividerLine} />
+            <View style={s.divider}>
+              <View style={s.dividerLine} />
+              <Text style={[s.dividerText, { color: c.textFaint }]}>or pick someone</Text>
+              <View style={s.dividerLine} />
             </View>
 
-            <View style={styles.section}>
+            <View style={s.section}>
               <SectionTitle
                 title="Recent partners"
                 subtitle="Tap to jump straight into their active session."
@@ -635,364 +636,179 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Style factory ────────────────────────────────────────────────────────────
 
-const c = theme.colors;
-const sp = theme.spacing;
-const r = theme.radius;
+function buildStyles(thm: AppTheme) {
+  const { colors: c, spacing: sp, radius: r } = thm;
+  return StyleSheet.create({
+    backBtn: { paddingVertical: sp.xs, marginTop: sp.xs },
+    backBtnText: { fontSize: 14 },
 
-const styles = StyleSheet.create({
-  backBtn: {
-    paddingVertical: sp.xs,
-    marginTop: sp.xs,
-  },
-  backBtnText: {
-    color: c.textSoft,
-    fontSize: 14,
-  },
+    scroll: { flex: 1 },
+    scrollContent: { paddingHorizontal: sp.gutter, paddingBottom: 40, gap: 0 },
 
-  scroll: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: sp.gutter,
-    paddingBottom: 40,
-    gap: 0,
-  },
+    section: { gap: sp.md, marginBottom: sp.sm },
+    presetRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: sp.sm,
+      marginTop: sp.xs,
+      marginBottom: sp.xs,
+    },
+    presetChip: {
+      flexGrow: 1,
+      flexBasis: '22%',
+      minWidth: 72,
+      borderRadius: sp.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: sp.sm,
+      paddingHorizontal: sp.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    presetChipSelected: { backgroundColor: c.accent, borderColor: c.accent },
+    presetChipText: { color: c.textMuted, fontSize: 14, fontWeight: '500', textAlign: 'center' },
+    presetChipTextSelected: { color: c.onAccent },
 
-  // Your invite code card
-  yourCodeCard: {
-    backgroundColor: c.accentSurface,
-    borderRadius: r.lg,
-    borderWidth: 1,
-    borderColor: c.accentSurfaceBorder,
-    padding: sp.xl,
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 28,
-  },
-  yourCodeLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: c.accent,
-    letterSpacing: 2,
-  },
-  yourCode: {
-    fontSize: 40,
-    fontWeight: '700',
-    color: c.text,
-    letterSpacing: 8,
-    fontVariant: ['tabular-nums'],
-  },
-  yourCodeHint: {
-    fontSize: 13,
-    color: c.textSoft,
-    marginTop: 2,
-  },
+    customModalOverlay: { flex: 1, justifyContent: 'flex-end' },
+    customModalBackdrop: {
+      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: c.backdrop,
+    },
+    customModalSheet: {
+      backgroundColor: c.surfaceRaised,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: 24,
+      paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+      paddingTop: 16,
+      borderWidth: 1,
+      borderColor: c.border,
+      gap: 12,
+    },
+    customModalHandle: {
+      width: 36, height: 4, backgroundColor: c.borderStrong,
+      borderRadius: 2, alignSelf: 'center', marginBottom: 8,
+    },
+    customModalTitle: { fontSize: 18, fontWeight: '600' },
+    customModalSubtitle: { fontSize: 14, marginTop: -4 },
+    customModalInput: {
+      backgroundColor: c.surface,
+      color: c.text,
+      borderRadius: r.sm,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      fontSize: 28,
+      fontWeight: '600',
+      borderWidth: 1,
+      borderColor: c.border,
+      textAlign: 'center',
+      fontVariant: ['tabular-nums'],
+    },
 
-  section: {
-    gap: sp.md,
-    marginBottom: sp.sm,
-  },
-  presetRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: sp.sm,
-    marginTop: sp.xs,
-    marginBottom: sp.xs,
-  },
-  presetChip: {
-    flexGrow: 1,
-    flexBasis: '22%',
-    minWidth: 72,
-    borderRadius: sp.sm,
-    borderWidth: 1,
-    borderColor: c.border,
-    paddingVertical: sp.sm,
-    paddingHorizontal: sp.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  presetChipSelected: {
-    backgroundColor: c.accent,
-    borderColor: c.accent,
-  },
-  presetChipText: {
-    color: c.textMuted,
-    fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  presetChipTextSelected: {
-    color: c.onAccent,
-  },
-  customModalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  customModalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  customModalSheet: {
-    backgroundColor: '#141414',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-    paddingTop: 16,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    gap: 12,
-  },
-  customModalHandle: {
-    width: 36,
-    height: 4,
-    backgroundColor: '#333',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 8,
-  },
-  customModalTitle: {
-    color: '#f5f5f5',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  customModalSubtitle: {
-    color: '#555',
-    fontSize: 14,
-    marginTop: -4,
-  },
-  customModalInput: {
-    backgroundColor: '#1a1a1a',
-    color: '#f5f5f5',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 28,
-    fontWeight: '600',
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    textAlign: 'center',
-    fontVariant: ['tabular-nums'],
-  },
-  actionBtn: {
-    backgroundColor: c.primary,
-    borderRadius: r.sm,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: sp.xs,
-  },
-  actionBtnSecondary: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  actionBtnDisabled: {
-    opacity: 0.35,
-  },
-  actionBtnText: {
-    color: c.primaryText,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  actionBtnTextSecondary: {
-    color: c.text,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: sp.xl,
-    gap: sp.md,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: c.surface,
-  },
-  dividerText: {
-    color: c.textFaint,
-    fontSize: 13,
-  },
-  codeInput: {
-    backgroundColor: c.surface,
-    color: c.text,
-    borderRadius: r.sm,
-    paddingHorizontal: sp.lg,
-    paddingVertical: Platform.OS === 'ios' ? 14 : sp.md,
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 6,
-    borderWidth: 1,
-    borderColor: c.border,
-    textAlign: 'center',
-  },
+    actionBtn: {
+      backgroundColor: c.primary,
+      borderRadius: r.sm,
+      paddingVertical: 15,
+      alignItems: 'center',
+      marginTop: sp.xs,
+    },
+    actionBtnSecondary: { backgroundColor: 'transparent', borderWidth: 1, borderColor: c.border },
+    actionBtnDisabled: { opacity: 0.35 },
+    actionBtnText: { color: c.primaryText, fontSize: 15, fontWeight: '600' },
+    actionBtnTextSecondary: { color: c.text },
 
-  // Partner history
-  partnerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: c.surface,
-    borderRadius: r.sm,
-    borderWidth: 1,
-    borderColor: c.border,
-    padding: 14,
-    gap: sp.md,
-  },
-  partnerInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  partnerName: {
-    color: c.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  partnerMeta: {
-    color: c.textDim,
-    fontSize: 12,
-  },
-  joinPartnerBtn: {
-    borderRadius: sp.sm,
-    borderWidth: 1,
-    borderColor: c.accent,
-    paddingVertical: 7,
-    paddingHorizontal: sp.lg,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  joinPartnerBtnDisabled: {
-    opacity: 0.5,
-  },
-  joinPartnerBtnText: {
-    color: c.accent,
-    fontSize: 13,
-    fontWeight: '600',
-  },
+    divider: { flexDirection: 'row', alignItems: 'center', marginVertical: sp.xl, gap: sp.md },
+    dividerLine: { flex: 1, height: 1, backgroundColor: c.surface },
+    dividerText: { fontSize: 13 },
 
-  // Waiting for approval
-  waitingContainer: {
-    flex: 1,
-    paddingHorizontal: sp.gutter,
-    paddingTop: 40,
-    gap: 20,
-  },
-  waitingCard: {
-    backgroundColor: c.accentSurface,
-    borderRadius: r.lg,
-    borderWidth: 1,
-    borderColor: c.accentSurfaceBorder,
-    padding: 28,
-    alignItems: 'center',
-    gap: 14,
-  },
-  waitingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: c.accent,
-  },
-  waitingTitle: {
-    color: c.text,
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 26,
-  },
-  waitingSubtitle: {
-    color: c.textSoft,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  withdrawBtn: {
-    alignItems: 'center',
-    paddingVertical: 14,
-  },
-  withdrawBtnText: {
-    color: c.textFaint,
-    fontSize: 14,
-  },
+    codeInput: {
+      backgroundColor: c.surface,
+      color: c.text,
+      borderRadius: r.sm,
+      paddingHorizontal: sp.lg,
+      paddingVertical: Platform.OS === 'ios' ? 14 : sp.md,
+      fontSize: 20,
+      fontWeight: '700',
+      letterSpacing: 6,
+      borderWidth: 1,
+      borderColor: c.border,
+      textAlign: 'center',
+    },
 
-  // Task selection (inline view)
-  selectionContainer: {
-    flex: 1,
-    paddingHorizontal: sp.gutter,
-    paddingTop: sp.xs,
-  },
-  selectionSectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  selectionSectionSubtitle: {
-    marginBottom: 20,
-  },
-  selectionLoader: {
-    marginTop: 40,
-  },
-  selectionEmpty: {
-    flex: 1,
-    marginBottom: 60,
-  },
-  selectionList: {
-    flex: 1,
-    marginBottom: sp.lg,
-  },
-  selectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: c.surface,
-    borderRadius: r.sm,
-    borderWidth: 1,
-    borderColor: c.border,
-    padding: 14,
-    marginBottom: sp.sm,
-    gap: sp.md,
-  },
-  selectionRowChecked: {
-    borderColor: c.accent,
-    backgroundColor: c.accentSurface,
-  },
-  selectionRowDisabled: {
-    opacity: 0.4,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: c.borderStrong,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  checkboxChecked: {
-    backgroundColor: c.accent,
-    borderColor: c.accent,
-  },
-  checkmark: {
-    color: c.onAccent,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 15,
-  },
-  selectionTaskInfo: {
-    flex: 1,
-    gap: 3,
-  },
-  selectionTaskTitle: {
-    color: c.text,
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  selectionTaskTitleDim: {
-    color: c.textDim,
-  },
-  selectionTaskTimer: {
-    color: c.textSoft,
-    fontSize: 12,
-    fontVariant: ['tabular-nums'],
-  },
-});
+    // Partner history
+    partnerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.surface,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 14,
+      gap: sp.md,
+    },
+    partnerInfo: { flex: 1, gap: 3 },
+    partnerName: { fontSize: 15, fontWeight: '600' },
+    partnerMeta: { fontSize: 12 },
+    joinPartnerBtn: {
+      borderRadius: sp.sm,
+      borderWidth: 1,
+      borderColor: c.accent,
+      paddingVertical: 7,
+      paddingHorizontal: sp.lg,
+      minWidth: 60,
+      alignItems: 'center',
+    },
+    joinPartnerBtnDisabled: { opacity: 0.5 },
+    joinPartnerBtnText: { fontSize: 13, fontWeight: '600' },
+
+    // Waiting
+    waitingContainer: { flex: 1, paddingHorizontal: sp.gutter, paddingTop: 40, gap: 20 },
+    waitingCard: {
+      backgroundColor: c.accentSurface,
+      borderRadius: r.lg,
+      borderWidth: 1,
+      borderColor: c.accentSurfaceBorder,
+      padding: 28,
+      alignItems: 'center',
+      gap: 14,
+    },
+    waitingDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: c.accent },
+    waitingTitle: { fontSize: 18, fontWeight: '600', textAlign: 'center', lineHeight: 26 },
+    waitingSubtitle: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+    withdrawBtn: { alignItems: 'center', paddingVertical: 14 },
+    withdrawBtnText: { fontSize: 14 },
+
+    // Task selection
+    selectionContainer: { flex: 1, paddingHorizontal: sp.gutter, paddingTop: sp.xs },
+    selectionSectionTitle: { fontSize: 20, fontWeight: '600' },
+    selectionSectionSubtitle: { marginBottom: 20 },
+    selectionLoader: { marginTop: 40 },
+    selectionEmpty: { flex: 1, marginBottom: 60 },
+    selectionList: { flex: 1, marginBottom: sp.lg },
+    selectionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: c.surface,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: 14,
+      marginBottom: sp.sm,
+      gap: sp.md,
+    },
+    selectionRowChecked: { borderColor: c.accent, backgroundColor: c.accentSurface },
+    selectionRowDisabled: { opacity: 0.4 },
+    checkbox: {
+      width: 22, height: 22, borderRadius: 6, borderWidth: 1.5,
+      borderColor: c.borderStrong, justifyContent: 'center', alignItems: 'center', flexShrink: 0,
+    },
+    checkboxChecked: { backgroundColor: c.accent, borderColor: c.accent },
+    checkmark: { color: c.onAccent, fontSize: 13, fontWeight: '700', lineHeight: 15 },
+    selectionTaskInfo: { flex: 1, gap: 3 },
+    selectionTaskTitle: { color: c.text, fontSize: 15, fontWeight: '500' },
+    selectionTaskTitleDim: { color: c.textDim },
+    selectionTaskTimer: { color: c.textSoft, fontSize: 12, fontVariant: ['tabular-nums'] },
+  });
+}

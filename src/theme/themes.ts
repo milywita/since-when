@@ -37,6 +37,11 @@ export type ThemeColorPalette = {
   backdrop: string;
   backdropHeavy: string;
   backdropModal: string;
+  /** Active / live session green band (rejoin banner). */
+  liveSessionBg: string;
+  liveSessionBorder: string;
+  liveSessionText: string;
+  liveSessionTextMuted: string;
 };
 
 export type ThemeSpacing = {
@@ -106,6 +111,52 @@ export const midnightMinimalPalette: ThemeColorPalette = {
   backdrop: 'rgba(0,0,0,0.6)',
   backdropHeavy: 'rgba(0,0,0,0.82)',
   backdropModal: 'rgba(0,0,0,0.65)',
+  liveSessionBg: '#0d1f0d',
+  liveSessionBorder: '#1e4d1e',
+  liveSessionText: '#4ade80',
+  liveSessionTextMuted: '#a7f3c0',
+};
+
+/**
+ * Pastel light palette — "Lavender Cloud".
+ * Soft lavender backgrounds, deep-indigo text, same indigo accent family.
+ */
+export const pastelLightPalette: ThemeColorPalette = {
+  background: '#f7f6ff',
+  surface: '#ffffff',
+  surfaceSoft: '#f0eeff',
+  border: '#e2dfff',
+  text: '#1c1740',
+  textMuted: '#6b659e',
+  textSoft: '#9991c8',
+  textDim: '#b8b3da',
+  textFaint: '#d0ccea',
+  textSecondary: '#8882b8',
+  primary: '#1c1740',
+  primaryText: '#f7f6ff',
+  accent: '#7068f0',
+  accentMuted: '#c4c0ff',
+  accentLight: '#9d98f7',
+  accentSurface: '#eeecff',
+  accentSurfaceBorder: '#d8d5ff',
+  danger: '#d94f4f',
+  dangerMuted: '#e89090',
+  warning: '#c97c00',
+  success: '#2e7d52',
+  borderDanger: '#fce8e8',
+  surfaceRaised: '#ffffff',
+  surfaceInset: '#eeecff',
+  borderInner: '#ede9ff',
+  borderStrong: '#c8c4f0',
+  onAccent: '#ffffff',
+  shadow: '#c0bce0',
+  backdrop: 'rgba(50,40,120,0.2)',
+  backdropHeavy: 'rgba(50,40,120,0.45)',
+  backdropModal: 'rgba(50,40,120,0.25)',
+  liveSessionBg: '#e8fdf0',
+  liveSessionBorder: '#a8e6c4',
+  liveSessionText: '#1e6e40',
+  liveSessionTextMuted: '#2e9058',
 };
 
 const midnightSpacing: ThemeSpacing = {
@@ -170,13 +221,12 @@ export function createAppTheme(
   };
 }
 
-/** Registered themes. Add `lightMinimal` here when the light palette is ready. */
 export const themes = {
   midnightMinimal: createAppTheme(midnightMinimalPalette),
+  pastelLight: createAppTheme(pastelLightPalette),
 } as const;
 
 export type ThemeId = keyof typeof themes;
 
+/** Fallback static reference kept for non-component usages (spacing / radius lookups). */
 export const theme = themes.midnightMinimal;
-
-/** Future hook for switching: resolveTheme(id: ThemeId) => AppTheme */

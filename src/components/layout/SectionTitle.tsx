@@ -6,7 +6,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type SectionTitleProps = {
   title: string;
@@ -23,32 +23,18 @@ export function SectionTitle({
   titleStyle,
   subtitleStyle,
 }: SectionTitleProps) {
+  const { colors: c, spacing: sp } = useTheme();
   return (
-    <View style={[styles.wrap, style]}>
-      <Text style={[styles.title, titleStyle]}>{title}</Text>
+    <View style={[{ gap: sp.sm, marginBottom: sp.sm }, style]}>
+      <Text style={[styles.title, { color: c.text }, titleStyle]}>{title}</Text>
       {subtitle ? (
-        <Text style={[styles.subtitle, subtitleStyle]}>{subtitle}</Text>
+        <Text style={[styles.subtitle, { color: c.textSoft }, subtitleStyle]}>{subtitle}</Text>
       ) : null}
     </View>
   );
 }
 
-const c = theme.colors;
-const sp = theme.spacing;
-
 const styles = StyleSheet.create({
-  wrap: {
-    gap: sp.sm,
-    marginBottom: sp.sm,
-  },
-  title: {
-    color: c.text,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  subtitle: {
-    color: c.textSoft,
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  title: { fontSize: 18, fontWeight: '600' },
+  subtitle: { fontSize: 14, lineHeight: 20 },
 });

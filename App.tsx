@@ -4,8 +4,10 @@ import { NavigationContainer } from '@react-navigation/native';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import AuthNavigator from './src/navigation/AuthNavigator';
 import AppNavigator from './src/navigation/AppNavigator';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 
-export default function App() {
+function AppContent() {
+  const { colors: c } = useTheme();
   const [initialising, setInitialising] = useState(true);
   const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
 
@@ -21,8 +23,8 @@ export default function App() {
 
   if (initialising) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color="#f5f5f5" />
+      <View style={[styles.loading, { backgroundColor: c.background }]}>
+        <ActivityIndicator size="large" color={c.text} />
       </View>
     );
   }
@@ -34,10 +36,17 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}
+
 const styles = StyleSheet.create({
   loading: {
     flex: 1,
-    backgroundColor: '#0d0d0d',
     justifyContent: 'center',
     alignItems: 'center',
   },

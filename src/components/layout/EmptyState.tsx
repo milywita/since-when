@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, type ViewStyle } from 'react-native';
-import { theme } from '../../theme/themes';
+import { useTheme } from '../../theme/ThemeContext';
 
 export type EmptyStateProps = {
   title: string;
@@ -9,16 +9,14 @@ export type EmptyStateProps = {
 };
 
 export function EmptyState({ title, subtitle, style }: EmptyStateProps) {
+  const { colors: c, spacing: sp } = useTheme();
   return (
     <View style={[styles.wrap, style]}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{subtitle}</Text>
+      <Text style={[styles.title, { color: c.text, marginBottom: sp.sm }]}>{title}</Text>
+      <Text style={[styles.subtitle, { color: c.textSoft }]}>{subtitle}</Text>
     </View>
   );
 }
-
-const c = theme.colors;
-const sp = theme.spacing;
 
 const styles = StyleSheet.create({
   wrap: {
@@ -28,14 +26,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   title: {
-    color: c.text,
     fontSize: 20,
     fontWeight: '600',
-    marginBottom: sp.sm,
     textAlign: 'center',
   },
   subtitle: {
-    color: c.textSoft,
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
