@@ -48,6 +48,16 @@ const TIME_PRESETS: { label: string; ms: number }[] = [
   { label: '1 day', ms: 24 * 60 * 60 * 1000 },
 ];
 
+/** Light theme only: Together banner + history session cards (dark uses theme tokens). */
+const TOGETHER_LIGHT = {
+  surface: '#ffffff',
+  border: '#c4c9ef',
+  divider: '#e6e9fb',
+} as const;
+
+/** Light: TOGETHER pill text — deeper indigo than default accent for readability on white. */
+const TOGETHER_BADGE_TEXT_LIGHT = '#3730a3';
+
 // ─── Completed task row ───────────────────────────────────────────────────────
 
 type S = ReturnType<typeof buildStyles>;
@@ -89,9 +99,14 @@ function formatTime(ms: number): string {
   return `${h % 12 || 12}:${m} ${ampm}`;
 }
 
-type TogetherHistoryCardProps = { record: SessionHistoryRecord; c: AppTheme['colors']; s: S };
+type TogetherHistoryCardProps = {
+  record: SessionHistoryRecord;
+  c: AppTheme['colors'];
+  s: S;
+  isDark: boolean;
+};
 
-function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
+function TogetherHistoryCard({ record, c, s, isDark }: TogetherHistoryCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   const myCompleted = record.myTasks.filter(t => t.completedAt !== null);
@@ -115,9 +130,15 @@ function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
       <View style={s.togetherCardHeader}>
         <View style={s.togetherCardLeft}>
           <View style={s.togetherCardBadge}>
-            <Text style={[s.togetherCardBadgeText, { color: c.accent }]}>TOGETHER</Text>
+            <Text
+              style={[
+                s.togetherCardBadgeText,
+                { color: isDark ? c.accent : TOGETHER_BADGE_TEXT_LIGHT },
+              ]}>
+              TOGETHER
+            </Text>
           </View>
-          <Text style={[s.togetherCardPartner, { color: c.accentMuted }]} numberOfLines={1}>
+          <Text style={[s.togetherCardPartner, { color: c.text }]} numberOfLines={1}>
             with {partnerNames || 'no partner'}
           </Text>
         </View>
@@ -127,7 +148,7 @@ function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
         </View>
       </View>
 
-      <Text style={[s.togetherCardSummary, { color: c.textSoft }]}>
+      <Text style={[s.togetherCardSummary, { color: isDark ? c.textSoft : c.textMuted }]}>
         {myCompleted.length > 0
           ? `${myCompleted.length} of ${record.myTasks.length} task${record.myTasks.length !== 1 ? 's' : ''} completed`
           : record.myTasks.length > 0
@@ -154,10 +175,16 @@ function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
                       {isDone ? '✓' : '○'}
                     </Text>
                     <View style={s.togetherTaskInfo}>
-                      <Text style={[
-                        s.togetherTaskTitle,
-                        { color: isDone ? c.accentMuted : c.textDim },
-                      ]} numberOfLines={2}>
+                      <Text
+                        style={[
+                          s.togetherTaskTitle,
+                          {
+                            color: isDone
+                              ? (isDark ? c.accentMuted : c.textMuted)
+                              : (isDark ? c.textDim : c.text),
+                          },
+                        ]}
+                        numberOfLines={2}>
                         {task.title}
                       </Text>
                       {isDone && duration !== null && (
@@ -199,10 +226,16 @@ function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
                       {isDone ? '✓' : '○'}
                     </Text>
                     <View style={s.togetherTaskInfo}>
-                      <Text style={[
-                        s.togetherTaskTitle,
-                        { color: isDone ? c.accentMuted : c.textDim },
-                      ]} numberOfLines={2}>
+                      <Text
+                        style={[
+                          s.togetherTaskTitle,
+                          {
+                            color: isDone
+                              ? (isDark ? c.accentMuted : c.textMuted)
+                              : (isDark ? c.textDim : c.text),
+                          },
+                        ]}
+                        numberOfLines={2}>
                         {task.title}
                       </Text>
                       {isDone && duration !== null && (
@@ -219,7 +252,9 @@ function TogetherHistoryCard({ record, c, s }: TogetherHistoryCardProps) {
         </View>
       )}
 
-      <Text style={[s.togetherCardChevron, { color: c.textFaint }]}>{expanded ? '▲' : '▼'}</Text>
+      <Text style={[s.togetherCardChevron, { color: isDark ? c.textFaint : c.accent }]}>
+        {expanded ? '▲' : '▼'}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -494,8 +529,8 @@ type Props = AppScreenProps<'Home'>;
 export default function HomeScreen({ navigation }: Props) {
   const thm = useTheme();
   const { colors: c } = thm;
-  const s = useMemo(() => buildStyles(thm), [thm]);
   const { isDark, toggleTheme } = useThemeToggle();
+  const s = useMemo(() => buildStyles(thm, isDark), [thm, isDark]);
 
   const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
@@ -633,8 +668,16 @@ export default function HomeScreen({ navigation }: Props) {
         onPress={() => navigation.navigate('TogetherLobby')}
         activeOpacity={0.75}>
         <View style={s.togetherBannerLeft}>
-          <Text style={[s.togetherBannerLabel, { color: c.accent }]}>TOGETHER</Text>
-          <Text style={[s.togetherBannerText, { color: c.accentMuted }]}>Work with someone</Text>
+          <View style={s.togetherBannerBadge}>
+            <Text
+              style={[
+                s.togetherCardBadgeText,
+                { color: isDark ? c.accent : TOGETHER_BADGE_TEXT_LIGHT },
+              ]}>
+              TOGETHER
+            </Text>
+          </View>
+          <Text style={[s.togetherBannerText, { color: c.text }]}>Work with someone</Text>
         </View>
         <Text style={[s.togetherBannerArrow, { color: c.accent }]}>›</Text>
       </TouchableOpacity>
@@ -740,7 +783,7 @@ export default function HomeScreen({ navigation }: Props) {
 
                   {currentSection.data.map(item =>
                     item.kind === 'togetherSession' ? (
-                      <TogetherHistoryCard key={item.record.sessionId} record={item.record} c={c} s={s} />
+                      <TogetherHistoryCard key={item.record.sessionId} record={item.record} c={c} s={s} isDark={isDark} />
                     ) : (
                       <CompletedRow key={item.task.id} task={item.task} c={c} s={s} />
                     ),
@@ -839,8 +882,30 @@ const themeIconStyles = StyleSheet.create({
 
 // ─── Style factory ────────────────────────────────────────────────────────────
 
-function buildStyles(thm: AppTheme) {
+function buildStyles(thm: AppTheme, isDark: boolean) {
   const { colors: c, spacing: sp, radius: r } = thm;
+
+  /** Bordered TOGETHER pill — history session cards only (home banner uses borderless label). */
+  const togetherPillBadge = {
+    alignSelf: 'flex-start' as const,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    ...(isDark
+      ? { backgroundColor: c.accentSurface, borderColor: c.accentSurfaceBorder }
+      : { backgroundColor: '#e8ebfb', borderColor: '#a8b4f0' }),
+  };
+
+  /** Home Together row: TOGETHER label without inner border (both themes). */
+  const togetherBannerBadge = {
+    alignSelf: 'flex-start' as const,
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  };
+
   return StyleSheet.create({
     loadingRoot: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: sp.xl + sp.sm },
     errorText: { fontSize: 15, fontWeight: '600', marginBottom: sp.sm, textAlign: 'center' },
@@ -871,14 +936,34 @@ function buildStyles(thm: AppTheme) {
     rejoinBannerArrow: { fontSize: 20, fontWeight: '300' },
 
     togetherBanner: {
-      marginHorizontal: sp.gutter, marginBottom: sp.md,
-      backgroundColor: c.accentSurface, borderRadius: r.sm, borderWidth: 1,
-      borderColor: c.accentSurfaceBorder, paddingVertical: sp.md, paddingHorizontal: 14,
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      marginHorizontal: sp.gutter,
+      marginBottom: sp.md,
+      borderRadius: r.sm,
+      paddingVertical: sp.md,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      ...(isDark
+        ? {
+            backgroundColor: c.accentSurface,
+            borderWidth: 1,
+            borderColor: c.accentSurfaceBorder,
+          }
+        : {
+            backgroundColor: TOGETHER_LIGHT.surface,
+            borderWidth: 1.5,
+            borderColor: TOGETHER_LIGHT.border,
+            shadowColor: '#1c1740',
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: 0.1,
+            shadowRadius: 12,
+            elevation: 5,
+          }),
     },
-    togetherBannerLeft: { gap: 2 },
-    togetherBannerLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 2 },
-    togetherBannerText: { fontSize: 14, fontWeight: '500' },
+    togetherBannerLeft: { gap: 3 },
+    togetherBannerText: { fontSize: 14, fontWeight: '600', letterSpacing: 0.15 },
+    togetherBannerBadge,
     togetherBannerArrow: { fontSize: 20, fontWeight: '300' },
 
     tabs: { flexDirection: 'row', paddingHorizontal: sp.gutter, marginBottom: sp.sm, gap: sp.xs },
@@ -961,16 +1046,29 @@ function buildStyles(thm: AppTheme) {
 
     // Together history card
     togetherCard: {
-      backgroundColor: c.accentSurface, borderRadius: 12, borderWidth: 1,
-      borderColor: c.accentSurfaceBorder, padding: 14, marginBottom: 10,
+      borderRadius: 12,
+      padding: 14,
+      marginBottom: 10,
+      ...(isDark
+        ? {
+            backgroundColor: c.accentSurface,
+            borderWidth: 1,
+            borderColor: c.accentSurfaceBorder,
+          }
+        : {
+            backgroundColor: TOGETHER_LIGHT.surface,
+            borderWidth: 1.5,
+            borderColor: TOGETHER_LIGHT.border,
+            shadowColor: '#1c1740',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 10,
+            elevation: 4,
+          }),
     },
     togetherCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 },
     togetherCardLeft: { flex: 1, gap: 3, marginRight: 12 },
-    togetherCardBadge: {
-      alignSelf: 'flex-start', backgroundColor: c.accentSurface,
-      borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2,
-      borderWidth: 1, borderColor: c.accentSurfaceBorder,
-    },
+    togetherCardBadge: togetherPillBadge,
     togetherCardBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
     togetherCardPartner: { fontSize: 15, fontWeight: '600' },
     togetherCardRight: { alignItems: 'flex-end', gap: 2 },
@@ -978,7 +1076,13 @@ function buildStyles(thm: AppTheme) {
     togetherCardDuration: { fontSize: 11 },
     togetherCardSummary: { fontSize: 13, marginBottom: 4 },
     togetherCardChevron: { fontSize: 10, textAlign: 'center', marginTop: 6 },
-    togetherCardBody: { marginTop: 10, borderTopWidth: 1, borderTopColor: c.accentSurfaceBorder, paddingTop: 10, gap: 12 },
+    togetherCardBody: {
+      marginTop: 10,
+      borderTopWidth: 1,
+      borderTopColor: isDark ? c.accentSurfaceBorder : TOGETHER_LIGHT.divider,
+      paddingTop: 10,
+      gap: 12,
+    },
     togetherSection: { gap: 6 },
     togetherSectionLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2 },
     togetherEmptyPartner: { fontSize: 13, fontStyle: 'italic' },

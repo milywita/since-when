@@ -18,7 +18,7 @@ export function SessionTimerCard({
   onComplete,
   onClearFocus,
 }: SessionTimerCardProps) {
-  const { colors: c, spacing: sp } = useTheme();
+  const { colors: c, spacing: sp, radius: r } = useTheme();
   const elapsed = now - task.createdAt;
   const isOld = elapsed > 86400 * 1000;
   const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
@@ -30,7 +30,7 @@ export function SessionTimerCard({
         {
           backgroundColor: c.accentSurface,
           borderColor: c.accent,
-          marginBottom: sp.sm,
+          borderRadius: r.sm,
         },
       ]}>
       <View style={styles.focusHeader}>
@@ -72,7 +72,6 @@ export function SessionTimerCard({
 
 const styles = StyleSheet.create({
   focusCard: {
-    borderRadius: 14,
     borderWidth: 1.5,
     padding: 18,
     gap: 6,

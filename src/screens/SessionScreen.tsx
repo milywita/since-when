@@ -1099,13 +1099,13 @@ function buildStyles(thm: AppTheme) {
       borderColor: c.accentSurfaceBorder, paddingVertical: sp.md, paddingHorizontal: 14,
     },
     focusHintText: { fontSize: 13, lineHeight: 18, opacity: 0.8 },
-    focusWrap: { gap: sp.sm, marginBottom: sp.sm },
+    focusWrap: { gap: sp.sm },
     taskGap: { gap: sp.sm },
 
     myTaskRow: {
       flexDirection: 'row', alignItems: 'center', backgroundColor: c.surface,
       borderRadius: r.sm, borderWidth: 1, borderColor: c.border,
-      padding: sp.md, marginBottom: sp.sm, gap: 10,
+      padding: sp.md, gap: 10,
     },
     myTaskRowDone: { opacity: 0.45 },
     activeDot: {

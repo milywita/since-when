@@ -46,11 +46,12 @@ export function TaskCard({ task, now, onComplete, onDelete, onEdit, style }: Tas
           backgroundColor: c.surface,
           borderRadius: r.md,
           borderColor: overEstimate ? c.borderDanger : c.border,
+          borderWidth: overEstimate ? 1.5 : 1,
         },
         style,
       ]}
       onLongPress={handleLongPress}
-      activeOpacity={0.75}>
+      activeOpacity={1}>
       <View style={[styles.cardLeft, { marginRight: sp.md }]}>
         <Text style={[styles.cardTitle, { color: c.text, marginBottom: 6 }]} numberOfLines={2}>
           {task.title}

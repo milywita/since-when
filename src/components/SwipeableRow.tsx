@@ -24,6 +24,13 @@ export function SwipeableRow({ children, onDelete, borderRadius = 12, style }: P
   const { colors: c } = useTheme();
   const translateX = useRef(new Animated.Value(0)).current;
 
+  /** Hide danger layer at rest so layout gaps / radius mismatch never flash red. */
+  const deleteBgOpacity = translateX.interpolate({
+    inputRange: [-SCREEN_WIDTH, -10, 0],
+    outputRange: [1, 1, 0],
+    extrapolate: 'clamp',
+  });
+
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, { dx, dy }) =>
@@ -60,12 +67,15 @@ export function SwipeableRow({ children, onDelete, borderRadius = 12, style }: P
   ).current;
 
   return (
-    <View style={style}>
-      <View
-        style={[styles.background, { borderRadius, backgroundColor: c.danger }]}
+    <View style={[styles.root, { borderRadius }, style]}>
+      <Animated.View
+        style={[
+          styles.background,
+          { borderRadius, backgroundColor: c.danger, opacity: deleteBgOpacity },
+        ]}
         pointerEvents="none">
         <TrashIcon color={c.onAccent} />
-      </View>
+      </Animated.View>
       <Animated.View
         style={{ transform: [{ translateX }] }}
         {...panResponder.panHandlers}>
@@ -90,6 +100,9 @@ function TrashIcon({ color }: { color: string }) {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    overflow: 'hidden',
+  },
   background: {
     position: 'absolute',
     top: 0,
