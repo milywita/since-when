@@ -42,13 +42,25 @@ export type Reaction = {
   sentAt: number;
 };
 
-export const REACTION_OPTIONS = [
+/** Reactions to send while a task is still in progress. */
+export const REACTION_OPTIONS_ACTIVE = [
   "Killing it!",
   "I'm watching you",
   "Do it faster",
   "Judging respectfully",
   "You got this",
 ] as const;
+
+/** Reactions to send after a task has been completed. */
+export const REACTION_OPTIONS_COMPLETED = [
+  "Finally!",
+  "Took you long enough",
+  "That's actually impressive",
+  "About time",
+  "Proud of you (I guess)",
+] as const;
+
+export const REACTION_OPTIONS = REACTION_OPTIONS_ACTIVE;
 
 export const SESSION_DURATION_PRESETS: { label: string; ms: number }[] = [
   { label: '25 min', ms: 25 * 60 * 1000 },
@@ -67,4 +79,23 @@ export type JoinRequest = {
   tasks: SessionTask[];
   status: 'pending' | 'approved' | 'denied';
   createdAt: number;
+};
+
+export type PartnerSummary = {
+  userId: string;
+  displayName: string;
+  tasks: SessionTask[];
+};
+
+/** Snapshot saved to users/{uid}/sessionHistory/{sessionId} when a session ends or user leaves. */
+export type SessionHistoryRecord = {
+  sessionId: string;
+  startedAt: number;
+  endedAt: number;
+  /** Other members present during this user's participation. */
+  partners: PartnerSummary[];
+  /** This user's own tasks at the time of exit. */
+  myTasks: SessionTask[];
+  /** Reactions sent TO this user's tasks by others. */
+  reactionsReceived: Reaction[];
 };

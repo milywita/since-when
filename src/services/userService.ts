@@ -16,7 +16,7 @@ export async function getOrCreateUserProfile(uid: string): Promise<UserProfile> 
   const ref = usersCol().doc(uid);
   const doc = await ref.get();
 
-  if (doc.exists) {
+  if (doc.exists()) {
     const data = (doc.data() ?? {}) as Partial<UserProfile>;
     // If the profile is complete, return it directly.
     if (data.personalInviteCode) {

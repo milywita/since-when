@@ -174,9 +174,6 @@ export async function addTaskToSession(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  if (member.tasks.length >= 6) {
-    throw new Error('You can only bring 6 tasks into a session.');
-  }
   await memberRef.update({ tasks: [...member.tasks, task] });
 }
 
@@ -353,6 +350,16 @@ export async function sendReaction(
 }
 
 // ─── Real-time subscriptions ──────────────────────────────────────────────────
+
+/**
+ * One-shot fetch of a session's current status.
+ * Returns null if the document does not exist.
+ */
+export async function getSessionOnce(sessionId: string): Promise<Session | null> {
+  const doc = await sessionsCol().doc(sessionId).get();
+  if (!doc.exists) { return null; }
+  return doc.data() as Session;
+}
 
 export function subscribeToSession(
   sessionId: string,

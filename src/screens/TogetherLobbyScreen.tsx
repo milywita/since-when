@@ -11,6 +11,8 @@ import {
   Platform,
   ScrollView,
   Animated,
+  Modal,
+  KeyboardAvoidingView,
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import { EmptyState } from '../components/layout/EmptyState';
@@ -201,6 +203,8 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   const [mode, setMode] = useState<Mode>('pick');
   const [pending, setPending] = useState<Pending | null>(null);
   const [selectedDurationMs, setSelectedDurationMs] = useState(SESSION_DURATION_PRESETS[0].ms);
+  const [customModalVisible, setCustomModalVisible] = useState(false);
+  const [customInput, setCustomInput] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -471,42 +475,42 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
 
-        {/* ── Your invite code ── */}
-        <View style={styles.yourCodeCard}>
-          <Text style={styles.yourCodeLabel}>YOUR INVITE CODE</Text>
-          <Text style={styles.yourCode}>
-            {userProfile?.personalInviteCode ?? '------'}
-          </Text>
-          <Text style={styles.yourCodeHint}>
-            Share this code so others can join your session.
-          </Text>
-        </View>
-
         {/* ── Host a session ── */}
         <View style={styles.section}>
           <SectionTitle
             title="Start a session"
             subtitle="Pick a duration. Your session starts immediately."
           />
-          <View style={styles.presetRow}>
-            {SESSION_DURATION_PRESETS.map(p => (
-              <TouchableOpacity
-                key={p.ms}
-                style={[
-                  styles.presetChip,
-                  selectedDurationMs === p.ms && styles.presetChipSelected,
-                ]}
-                onPress={() => setSelectedDurationMs(p.ms)}>
-                <Text
-                  style={[
-                    styles.presetChipText,
-                    selectedDurationMs === p.ms && styles.presetChipTextSelected,
-                  ]}>
-                  {p.label}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          {(() => {
+            const isCustom = !SESSION_DURATION_PRESETS.some(p => p.ms === selectedDurationMs);
+            return (
+              <View style={styles.presetRow}>
+                {SESSION_DURATION_PRESETS.map(p => (
+                  <TouchableOpacity
+                    key={p.ms}
+                    style={[
+                      styles.presetChip,
+                      selectedDurationMs === p.ms && styles.presetChipSelected,
+                    ]}
+                    onPress={() => setSelectedDurationMs(p.ms)}>
+                    <Text style={[
+                      styles.presetChipText,
+                      selectedDurationMs === p.ms && styles.presetChipTextSelected,
+                    ]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+                <TouchableOpacity
+                  style={[styles.presetChip, isCustom && styles.presetChipSelected]}
+                  onPress={() => setCustomModalVisible(true)}>
+                  <Text style={[styles.presetChipText, isCustom && styles.presetChipTextSelected]}>
+                    {isCustom ? `${Math.round(selectedDurationMs / 60000)}m` : 'Custom'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
           <TouchableOpacity
             style={[styles.actionBtn, loading && styles.actionBtnDisabled]}
             onPress={handleHost}
@@ -516,6 +520,54 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
               : <Text style={styles.actionBtnText}>Start session</Text>}
           </TouchableOpacity>
         </View>
+
+        {/* ── Custom duration modal ── */}
+        <Modal
+          visible={customModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setCustomModalVisible(false)}>
+          <KeyboardAvoidingView
+            style={styles.customModalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <TouchableOpacity
+              style={styles.customModalBackdrop}
+              activeOpacity={1}
+              onPress={() => setCustomModalVisible(false)}
+            />
+            <View style={styles.customModalSheet}>
+              <View style={styles.customModalHandle} />
+              <Text style={styles.customModalTitle}>Custom duration</Text>
+              <Text style={styles.customModalSubtitle}>How many minutes?</Text>
+              <TextInput
+                style={styles.customModalInput}
+                placeholder="e.g. 45"
+                placeholderTextColor="#555"
+                value={customInput}
+                onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                autoFocus
+                maxLength={4}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.actionBtn,
+                  (!customInput || parseInt(customInput, 10) < 1) && styles.actionBtnDisabled,
+                ]}
+                disabled={!customInput || parseInt(customInput, 10) < 1}
+                onPress={() => {
+                  const mins = parseInt(customInput, 10);
+                  if (mins >= 1) {
+                    setSelectedDurationMs(mins * 60 * 1000);
+                    setCustomModalVisible(false);
+                    setCustomInput('');
+                  }
+                }}>
+                <Text style={styles.actionBtnText}>Set duration</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
@@ -645,13 +697,19 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: sp.sm,
     marginTop: sp.xs,
+    marginBottom: sp.xs,
   },
   presetChip: {
+    flexGrow: 1,
+    flexBasis: '22%',
+    minWidth: 72,
     borderRadius: sp.sm,
     borderWidth: 1,
     borderColor: c.border,
     paddingVertical: sp.sm,
-    paddingHorizontal: sp.lg,
+    paddingHorizontal: sp.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   presetChipSelected: {
     backgroundColor: c.accent,
@@ -661,9 +719,64 @@ const styles = StyleSheet.create({
     color: c.textMuted,
     fontSize: 14,
     fontWeight: '500',
+    textAlign: 'center',
   },
   presetChipTextSelected: {
     color: c.onAccent,
+  },
+  customModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  customModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  customModalSheet: {
+    backgroundColor: '#141414',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 24,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 28,
+    paddingTop: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    gap: 12,
+  },
+  customModalHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: '#333',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  customModalTitle: {
+    color: '#f5f5f5',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  customModalSubtitle: {
+    color: '#555',
+    fontSize: 14,
+    marginTop: -4,
+  },
+  customModalInput: {
+    backgroundColor: '#1a1a1a',
+    color: '#f5f5f5',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 28,
+    fontWeight: '600',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
   actionBtn: {
     backgroundColor: c.primary,

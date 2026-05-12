@@ -20,16 +20,30 @@ import { PartnerCard } from '../components/session/PartnerCard';
 import { SessionTimerCard } from '../components/session/SessionTimerCard';
 import { theme } from '../theme/themes';
 import { useSession } from '../hooks/useSession';
+import { SwipeableRow } from '../components/SwipeableRow';
 import { subscribeToUserProfile } from '../services/userService';
 import {
   subscribeToJoinRequests,
   approveJoinRequest,
   denyJoinRequest,
 } from '../services/sessionService';
-import type { SessionMember, SessionTask, JoinRequest } from '../types/Session';
-import { REACTION_OPTIONS, MAX_SESSION_TASKS, EXTEND_PRESETS } from '../types/Session';
+import type { SessionMember, SessionTask, Reaction, JoinRequest } from '../types/Session';
+import {
+  REACTION_OPTIONS_ACTIVE,
+  REACTION_OPTIONS_COMPLETED,
+  MAX_SESSION_TASKS,
+  EXTEND_PRESETS,
+} from '../types/Session';
 import type { UserProfile } from '../types/User';
 import type { AppScreenProps } from '../navigation/types';
+import {
+  requestNotificationPermissions,
+  ensureNotificationChannel,
+  scheduleSessionTimerNotification,
+  cancelSessionTimerNotification,
+  showSessionTimerNotificationNow,
+} from '../services/notificationService';
+import { TaskReactions } from '../components/session/TaskReactions';
 import { formatElapsed } from '../utils/formatElapsed';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -187,10 +201,14 @@ type ReactionPickerProps = {
   onSelect: (text: string) => Promise<void>;
   canReact: boolean;
   reactionCount: number;
+  isCompleted: boolean;
 };
 
-function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }: ReactionPickerProps) {
+function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount, isCompleted }: ReactionPickerProps) {
   const [sending, setSending] = useState(false);
+  const options = isCompleted ? REACTION_OPTIONS_COMPLETED : REACTION_OPTIONS_ACTIVE;
+  const title = isCompleted ? 'Celebrate the win' : 'Send a reaction';
+  const remaining = 3 - reactionCount;
 
   async function handleSelect(text: string) {
     setSending(true);
@@ -208,10 +226,12 @@ function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }:
       <View style={styles.reactionSheet}>
         {canReact ? (
           <>
-            <Text style={styles.reactionTitle}>Send a reaction</Text>
-            <Text style={styles.reactionMeta}>{3 - reactionCount} left this task</Text>
+            <Text style={styles.reactionTitle}>{title}</Text>
+            <Text style={styles.reactionMeta}>
+              {remaining} {remaining === 1 ? 'reaction' : 'reactions'} left for this task
+            </Text>
             <View style={styles.reactionOptions}>
-              {REACTION_OPTIONS.map(opt => (
+              {options.map(opt => (
                 <TouchableOpacity
                   key={opt}
                   style={styles.reactionBtn}
@@ -224,7 +244,7 @@ function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount }:
           </>
         ) : (
           <>
-            <Text style={styles.reactionTitle}>Reaction limit</Text>
+            <Text style={styles.reactionTitle}>Reaction limit reached</Text>
             <Text style={styles.reactionMeta}>3 reactions per task per session.</Text>
             <TouchableOpacity style={styles.reactionCloseBtn} onPress={onClose}>
               <Text style={styles.reactionCloseBtnText}>OK</Text>
@@ -242,11 +262,15 @@ type ExtendOverlayProps = {
   isHost: boolean;
   hostName: string;
   onExtend: (ms: number) => Promise<void>;
+  onCustomExtend: (minutes: number) => Promise<void>;
   onEnd: () => Promise<void>;
+  onLeave?: () => void;
 };
 
-function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps) {
+function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLeave }: ExtendOverlayProps) {
   const [busy, setBusy] = useState(false);
+  const [customModalVisible, setCustomModalVisible] = useState(false);
+  const [customInput, setCustomInput] = useState('');
 
   async function handleExtend(ms: number) {
     setBusy(true);
@@ -256,6 +280,21 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
   async function handleEnd() {
     setBusy(true);
     try { await onEnd(); } finally { setBusy(false); }
+  }
+
+  async function handleCustomExtend() {
+    const minutes = parseInt(customInput, 10);
+    if (Number.isNaN(minutes) || minutes < 1) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await onCustomExtend(minutes);
+      setCustomModalVisible(false);
+      setCustomInput('');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -277,6 +316,12 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
                   <Text style={styles.extendChipText}>{p.label}</Text>
                 </TouchableOpacity>
               ))}
+              <TouchableOpacity
+                style={[styles.extendChip, busy && styles.extendChipDisabled]}
+                onPress={() => setCustomModalVisible(true)}
+                disabled={busy}>
+                <Text style={styles.extendChipText}>Custom</Text>
+              </TouchableOpacity>
             </View>
             <TouchableOpacity
               style={[styles.extendEndBtn, busy && styles.extendChipDisabled]}
@@ -293,11 +338,69 @@ function ExtendOverlay({ isHost, hostName, onExtend, onEnd }: ExtendOverlayProps
               disabled={busy}>
               <Text style={styles.extendEndBtnText}>End session</Text>
             </TouchableOpacity>
+
+            <Modal
+              visible={customModalVisible}
+              transparent
+              animationType="slide"
+              onRequestClose={() => setCustomModalVisible(false)}>
+              <KeyboardAvoidingView
+                style={styles.modalOverlay}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                <TouchableOpacity
+                  style={styles.modalBackdrop}
+                  activeOpacity={1}
+                  onPress={() => setCustomModalVisible(false)}
+                />
+                <View style={styles.modalSheet}>
+                  <View style={styles.modalHandle} />
+                  <Text style={styles.modalTitle}>Extend session</Text>
+                  <Text style={styles.modalSubtitle}>Enter minutes to add</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="e.g. 35"
+                    placeholderTextColor="#555"
+                    value={customInput}
+                    onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
+                    keyboardType="number-pad"
+                    autoFocus
+                    maxLength={4}
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.modalAddBtn,
+                      (!customInput || parseInt(customInput, 10) < 1 || busy) && styles.modalAddBtnDisabled,
+                    ]}
+                    disabled={!customInput || parseInt(customInput, 10) < 1 || busy}
+                    onPress={handleCustomExtend}>
+                    {busy
+                      ? <ActivityIndicator color="#0d0d0d" />
+                      : <Text style={styles.modalAddBtnText}>Add time</Text>}
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
           </>
         ) : (
-          <Text style={styles.extendSubtitle}>
-            Waiting for {hostName} to extend or end the session…
-          </Text>
+          <>
+            <Text style={styles.extendSubtitle}>
+              Waiting for {hostName} to extend or end the session…
+            </Text>
+            <TouchableOpacity
+              style={styles.extendEndBtn}
+              onPress={() =>
+                Alert.alert(
+                  'Leave session?',
+                  'You can rejoin later if the session is still active.',
+                  [
+                    { text: 'Stay', style: 'cancel' },
+                    { text: 'Leave', style: 'destructive', onPress: onLeave },
+                  ],
+                )
+              }>
+              <Text style={styles.extendEndBtnText}>Leave session</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
     </View>
@@ -310,12 +413,13 @@ type MyTaskRowProps = {
   task: SessionTask;
   now: number;
   isActive: boolean;
+  receivedReactions: Reaction[];
   onComplete: () => void;
   onSetActive: () => void;
   onClearActive: () => void;
 };
 
-function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive }: MyTaskRowProps) {
+function MyTaskRow({ task, now, isActive, receivedReactions, onComplete, onSetActive, onClearActive }: MyTaskRowProps) {
   const elapsed = now - task.createdAt;
   const isOld = elapsed > 86400 * 1000;
   const isDone = task.completedAt !== null;
@@ -323,12 +427,15 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
 
   if (isActive && !isDone) {
     return (
-      <SessionTimerCard
-        task={task}
-        now={now}
-        onComplete={onComplete}
-        onClearFocus={onClearActive}
-      />
+      <View style={styles.focusWrap}>
+        <SessionTimerCard
+          task={task}
+          now={now}
+          onComplete={onComplete}
+          onClearFocus={onClearActive}
+        />
+        <TaskReactions reactions={receivedReactions} now={now} />
+      </View>
     );
   }
 
@@ -363,6 +470,7 @@ function MyTaskRow({ task, now, isActive, onComplete, onSetActive, onClearActive
             Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
+        <TaskReactions reactions={receivedReactions} now={now} />
       </View>
       {!isDone && (
         <TouchableOpacity style={styles.myDoneBtn} onPress={onComplete} hitSlop={8}>
@@ -471,16 +579,22 @@ export default function SessionScreen({ route, navigation }: Props) {
     leaveSession,
     extendSession,
     addTask,
+    removeTask,
     completeTask,
     setActiveTask,
     sendReaction,
-    syncMyTasksToSolo,
+    finalizeSession,
   } = useSession(sessionId);
 
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [reactionTarget, setReactionTarget] = useState<{ toUserId: string; taskId: string } | null>(null);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [reactionTarget, setReactionTarget] = useState<{
+    toUserId: string;
+    taskId: string;
+    completed: boolean;
+  } | null>(null);
 
   // Invite code chip
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -551,12 +665,76 @@ export default function SessionScreen({ route, navigation }: Props) {
     prevMemberCountRef.current = members.length;
   }, [members, loading, userId, flash]);
 
+  // Incoming reaction notification — fire a flash when a new reaction lands on one of MY tasks
+  const prevIncomingReactionIdsRef = useRef<Set<string>>(new Set());
+  const incomingReactionsBootstrapped = useRef(false);
+  useEffect(() => {
+    if (loading) { return; }
+    const incoming = reactions.filter(r => r.toUserId === userId);
+    if (!incomingReactionsBootstrapped.current) {
+      prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
+      incomingReactionsBootstrapped.current = true;
+      return;
+    }
+    const fresh = incoming.filter(r => !prevIncomingReactionIdsRef.current.has(r.id));
+    if (fresh.length > 0) {
+      const r = fresh[0];
+      const senderName = members.find(m => m.userId === r.fromUserId)?.displayName ?? 'Someone';
+      const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title;
+      flash(`${senderName}: "${r.text}"${taskTitle ? ` on "${taskTitle}"` : ''}`);
+    }
+    prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
+  }, [reactions, loading, userId, members, myMember, flash]);
+
   const myActiveTasks = myMember?.tasks.filter(t => t.completedAt === null) ?? [];
-  const atLimit = (myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS;
+  const myCompletedTasks = myMember?.tasks.filter(t => t.completedAt !== null) ?? [];
 
   const timeLeft = session?.endsAt ? Math.max(0, session.endsAt - now) : null;
   const timerExpired = timeLeft !== null && timeLeft <= 0 && session?.status === 'active';
   const sessionEnded = session?.status === 'ended';
+  const timerNotificationFiredRef = useRef(false);
+
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      const granted = await requestNotificationPermissions();
+      if (!granted || !alive) {
+        return;
+      }
+      await ensureNotificationChannel();
+    };
+    run().catch(console.error);
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!session?.endsAt || session.status !== 'active') {
+        await cancelSessionTimerNotification();
+        return;
+      }
+      await scheduleSessionTimerNotification(session.endsAt);
+    };
+    run().catch(() => {
+      flash('Could not schedule background timer notification.');
+    });
+  }, [session?.endsAt, session?.status, flash]);
+
+  useEffect(() => {
+    if (!session?.endsAt || session.status !== 'active') {
+      timerNotificationFiredRef.current = false;
+      return;
+    }
+    if (timerExpired && !timerNotificationFiredRef.current) {
+      timerNotificationFiredRef.current = true;
+      showSessionTimerNotificationNow().catch(console.error);
+    }
+    if (!timerExpired) {
+      timerNotificationFiredRef.current = false;
+    }
+  }, [timerExpired, session?.endsAt, session?.status]);
 
   // When the session ends, each user clears their own activeSessionId and syncs
   // session-only tasks back to Solo. (The host already cleared their own inside
@@ -566,9 +744,9 @@ export default function SessionScreen({ route, navigation }: Props) {
     if (sessionEnded && !syncedOnEndRef.current) {
       syncedOnEndRef.current = true;
       clearActiveSession().catch(console.error);
-      syncMyTasksToSolo().catch(console.error);
+      finalizeSession().catch(console.error);
     }
-  }, [sessionEnded, clearActiveSession, syncMyTasksToSolo]);
+  }, [sessionEnded, clearActiveSession, finalizeSession]);
 
   // Host name for the extend overlay non-host message
   const hostMember = members.find(m => m.userId === session?.createdBy);
@@ -586,8 +764,8 @@ export default function SessionScreen({ route, navigation }: Props) {
   }
 
   async function handleLeave() {
-    // Sync session-only tasks to Solo before removing the member document.
-    await syncMyTasksToSolo().catch(console.error);
+    // Save history and sync session-only tasks to Solo before removing the member doc.
+    await finalizeSession().catch(console.error);
     leaveSession().catch(console.error);
     navigation.popToTop();
   }
@@ -595,6 +773,10 @@ export default function SessionScreen({ route, navigation }: Props) {
   async function handleCompleteTask(task: SessionTask) {
     await completeTask(task);
     flash(`You did it. "${task.title}" — gone.`);
+  }
+
+  async function handleRemoveTask(task: SessionTask) {
+    await removeTask(task.taskId);
   }
 
   function handleSetActive(taskId: string) {
@@ -699,7 +881,9 @@ export default function SessionScreen({ route, navigation }: Props) {
           isHost={isHost}
           hostName={hostName}
           onExtend={extendSession}
+          onCustomExtend={async minutes => extendSession(minutes * 60 * 1000)}
           onEnd={endSession}
+          onLeave={isHost ? undefined : handleLeave}
         />
       )}
 
@@ -710,33 +894,68 @@ export default function SessionScreen({ route, navigation }: Props) {
 
         {/* My tasks */}
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your tasks</Text>
-            <Text style={styles.sectionMeta}>{myMember?.tasks.length ?? 0}/{MAX_SESSION_TASKS}</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Your tasks</Text>
 
-          {(myMember?.tasks.length ?? 0) === 0 && (
+          {myActiveTasks.length === 0 && myCompletedTasks.length === 0 && (
             <Text style={styles.emptyMy}>Add tasks you're working on this session.</Text>
           )}
 
-          {myMember?.tasks.map(task => (
-            <MyTaskRow
-              key={task.taskId}
-              task={task}
-              now={now}
-              isActive={myMember.activeTaskId === task.taskId}
-              onComplete={() => handleCompleteTask(task)}
-              onSetActive={() => handleSetActive(task.taskId)}
-              onClearActive={() => setActiveTask(null)}
-            />
-          ))}
+          <View style={styles.taskGap}>
+            {myActiveTasks.map(task => (
+              <SwipeableRow
+                key={task.taskId}
+                onDelete={() => handleRemoveTask(task)}
+                borderRadius={10}>
+                <MyTaskRow
+                  task={task}
+                  now={now}
+                  isActive={(myMember?.activeTaskId ?? null) === task.taskId}
+                  receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
+                  onComplete={() => handleCompleteTask(task)}
+                  onSetActive={() => handleSetActive(task.taskId)}
+                  onClearActive={() => setActiveTask(null)}
+                />
+              </SwipeableRow>
+            ))}
+          </View>
 
-          {!atLimit && (
-            <TouchableOpacity
-              style={styles.addTaskBtn}
-              onPress={() => setAddModalVisible(true)}>
-              <Text style={styles.addTaskBtnText}>+ Add task</Text>
-            </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addTaskBtn}
+            onPress={() => setAddModalVisible(true)}>
+            <Text style={styles.addTaskBtnText}>+ Add task</Text>
+          </TouchableOpacity>
+
+          {myCompletedTasks.length > 0 && (
+            <>
+              <TouchableOpacity
+                style={styles.completedToggle}
+                onPress={() => setCompletedExpanded(e => !e)}
+                activeOpacity={0.7}>
+                <Text style={styles.completedToggleText}>
+                  Done this session ({myCompletedTasks.length})
+                </Text>
+                <Text style={styles.completedToggleChevron}>
+                  {completedExpanded ? '▲' : '▼'}
+                </Text>
+              </TouchableOpacity>
+
+              {completedExpanded && (
+                <View style={styles.taskGap}>
+                  {myCompletedTasks.map(task => (
+                    <MyTaskRow
+                      key={task.taskId}
+                      task={task}
+                      now={now}
+                      isActive={false}
+                      receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
+                      onComplete={() => {}}
+                      onSetActive={() => {}}
+                      onClearActive={() => {}}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
           )}
         </View>
 
@@ -744,7 +963,7 @@ export default function SessionScreen({ route, navigation }: Props) {
         {myActiveTasks.length > 0 && myMember?.activeTaskId === null && (
           <View style={styles.focusHint}>
             <Text style={styles.focusHintText}>
-              Tap the dot next to a task to set your focus. Your partner can see what you're working on.
+              Tap the dot next to a task to set your focus. Your partner can see what you're working on. Swipe left to remove tasks.
             </Text>
           </View>
         )}
@@ -773,8 +992,12 @@ export default function SessionScreen({ route, navigation }: Props) {
             <PartnerCard
               member={member}
               now={now}
-              recentReactions={reactions.filter(r => r.toUserId === member.userId)}
-              onReact={taskId => setReactionTarget({ toUserId: member.userId, taskId })}
+              recentReactions={reactions.filter(
+                r => r.fromUserId === userId && r.toUserId === member.userId,
+              )}
+              onReact={(taskId, completed) =>
+                setReactionTarget({ toUserId: member.userId, taskId, completed })
+              }
             />
           </View>
         ))}
@@ -795,7 +1018,7 @@ export default function SessionScreen({ route, navigation }: Props) {
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
         onAdd={handleAddTask}
-        atLimit={atLimit}
+        atLimit={(myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS}
       />
 
       {reactionTarget !== null && (
@@ -805,6 +1028,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           onSelect={handleSendReaction}
           canReact={canReact(reactionTarget.taskId)}
           reactionCount={myReactionCountForTask(reactionTarget.taskId)}
+          isCompleted={reactionTarget.completed}
         />
       )}
     </Screen>
@@ -1014,6 +1238,15 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
 
+  focusWrap: {
+    gap: sp.sm,
+    marginBottom: sp.sm,
+  },
+
+  taskGap: {
+    gap: sp.sm,
+  },
+
   // Regular my-task row
   myTaskRow: {
     flexDirection: 'row',
@@ -1090,8 +1323,28 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     paddingVertical: sp.md,
     alignItems: 'center',
+    marginTop: 4,
   },
   addTaskBtnText: { color: c.textDim, fontSize: 14 },
+  completedToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    marginTop: sp.sm,
+    borderTopWidth: 1,
+    borderTopColor: c.borderInner,
+  },
+  completedToggleText: {
+    color: c.textDim,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  completedToggleChevron: {
+    color: c.textFaint,
+    fontSize: 10,
+  },
+
 
   // Extend overlay
   extendOverlay: {
@@ -1114,6 +1367,7 @@ const styles = StyleSheet.create({
     borderColor: c.border,
     padding: 28,
     gap: sp.md,
+    alignItems: 'center',
   },
   extendTitle: {
     color: c.text,
@@ -1125,12 +1379,14 @@ const styles = StyleSheet.create({
     color: c.textSoft,
     fontSize: 15,
     lineHeight: 21,
+    textAlign: 'center',
   },
   extendBtns: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: sp.sm,
     marginTop: sp.xs,
+    justifyContent: 'center',
   },
   extendChip: {
     backgroundColor: c.surface,

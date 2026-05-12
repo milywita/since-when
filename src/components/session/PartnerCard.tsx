@@ -5,12 +5,14 @@ import { theme } from '../../theme/themes';
 import { formatElapsed } from '../../utils/formatElapsed';
 import { PulsingDot } from './PulsingDot';
 import { ReactionButton } from './ReactionButton';
+import { TaskReactions } from './TaskReactions';
 
 export type PartnerCardProps = {
   member: SessionMember;
   now: number;
   recentReactions: Reaction[];
-  onReact: (taskId: string) => void;
+  /** `completed` selects celebration vs in-progress reaction phrases in the session picker. */
+  onReact: (taskId: string, completed: boolean) => void;
 };
 
 export function PartnerCard({
@@ -71,21 +73,20 @@ export function PartnerCard({
             )}
             <ReactionButton
               variant="focus"
-              onPress={() => onReact(activeTask.taskId)}
+              onPress={() => onReact(activeTask.taskId, false)}
             />
           </View>
-          {recentReactions.find(r => r.taskId === activeTask.taskId) && (
-            <Text style={styles.partnerReactionBubble}>
-              "{recentReactions.find(r => r.taskId === activeTask.taskId)!.text}"
-            </Text>
-          )}
+          <TaskReactions
+            reactions={recentReactions.filter(r => r.taskId === activeTask.taskId)}
+            now={now}
+          />
         </View>
       )}
 
       {otherTasks.map(task => {
         const elapsed = now - task.createdAt;
         const isDone = task.completedAt !== null;
-        const latestReaction = recentReactions.find(r => r.taskId === task.taskId);
+        const taskReactions = recentReactions.filter(r => r.taskId === task.taskId);
 
         return (
           <PartnerTaskRow
@@ -93,8 +94,9 @@ export function PartnerCard({
             task={task}
             elapsed={elapsed}
             isDone={isDone}
-            latestReaction={latestReaction}
-            onReact={() => onReact(task.taskId)}
+            taskReactions={taskReactions}
+            now={now}
+            onReact={() => onReact(task.taskId, isDone)}
           />
         );
       })}
@@ -106,7 +108,8 @@ type PartnerTaskRowProps = {
   task: SessionTask;
   elapsed: number;
   isDone: boolean;
-  latestReaction?: Reaction;
+  taskReactions: Reaction[];
+  now: number;
   onReact: () => void;
 };
 
@@ -114,7 +117,8 @@ function PartnerTaskRow({
   task,
   elapsed,
   isDone,
-  latestReaction,
+  taskReactions,
+  now,
   onReact,
 }: PartnerTaskRowProps) {
   return (
@@ -150,11 +154,12 @@ function PartnerTaskRow({
             Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
-        {latestReaction && (
-          <Text style={styles.partnerReactionBubble}>"{latestReaction.text}"</Text>
-        )}
+        <TaskReactions reactions={taskReactions} now={now} />
       </View>
-      {!isDone && <ReactionButton onPress={onReact} />}
+      <ReactionButton
+        onPress={onReact}
+        label={isDone ? '🎉' : 'React'}
+      />
     </View>
   );
 }
@@ -259,10 +264,4 @@ const styles = StyleSheet.create({
   partnerTaskDoneLabel: { color: c.success, fontSize: 12 },
   partnerEstimate: { color: c.textMuted, fontSize: 11 },
   partnerEstimateOver: { color: c.danger },
-  partnerReactionBubble: {
-    color: c.accent,
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginTop: 2,
-  },
 });

@@ -16,10 +16,12 @@ export type TaskCardProps = {
   now: number;
   onComplete: () => void;
   onDelete: () => void;
+  /** Opens edit UI when set (Together/Solo flows that support renaming tasks). */
+  onEdit?: () => void;
   style?: ViewStyle;
 };
 
-export function TaskCard({ task, now, onComplete, onDelete, style }: TaskCardProps) {
+export function TaskCard({ task, now, onComplete, onDelete, onEdit, style }: TaskCardProps) {
   const elapsed = now - task.createdAt;
   const overEstimate = task.estimatedMs !== null && elapsed > task.estimatedMs;
   const isOld = elapsed > 86400 * 1000;
@@ -59,9 +61,16 @@ export function TaskCard({ task, now, onComplete, onDelete, style }: TaskCardPro
           )}
         </View>
       </View>
-      <TouchableOpacity style={styles.doneBtn} onPress={onComplete} hitSlop={12}>
-        <Text style={styles.doneBtnText}>Done</Text>
-      </TouchableOpacity>
+      <View style={styles.cardActions}>
+        {onEdit !== undefined && (
+          <TouchableOpacity style={styles.editBtn} onPress={onEdit} hitSlop={12}>
+            <Text style={styles.editBtnText}>✎</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity style={styles.doneBtn} onPress={onComplete} hitSlop={12}>
+          <Text style={styles.doneBtnText}>Done</Text>
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -92,6 +101,22 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     marginBottom: 6,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.sm,
+  },
+  editBtn: {
+    borderRadius: sp.sm,
+    borderWidth: 1,
+    borderColor: c.border,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+  },
+  editBtnText: {
+    color: c.textMuted,
+    fontSize: 15,
   },
   cardMeta: {
     flexDirection: 'row',
