@@ -13,24 +13,32 @@ export type AppInputProps = TextInputProps & {
 };
 
 export function AppInput({ style, placeholderTextColor, ...rest }: AppInputProps) {
-  const { colors: c, radius: r, spacing: sp } = useTheme();
+  const { colors: c, radius: r, spacing: sp, typography: t } = useTheme();
+  const { color: _bodyColor, ...bodyType } = t.body;
+
+  const base: TextStyle = {
+    ...bodyType,
+    color: c.text,
+    fontWeight: '400',
+    fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
+    letterSpacing: 3,
+    backgroundColor: c.surface,
+    borderRadius: r.sm,
+    paddingHorizontal: sp.lg,
+    paddingVertical: 14,
+    marginBottom: sp.md,
+    borderWidth: 1,
+    borderColor: c.border,
+  };
+
+  if (Platform.OS === 'android') {
+    base.includeFontPadding = false;
+  }
+
   return (
     <TextInput
       placeholderTextColor={placeholderTextColor ?? c.textSecondary}
-      style={[
-        {
-          backgroundColor: c.surface,
-          color: c.text,
-          borderRadius: r.sm,
-          paddingHorizontal: sp.lg,
-          paddingVertical: 14,
-          fontSize: 16,
-          marginBottom: sp.md,
-          borderWidth: 1,
-          borderColor: c.border,
-        },
-        style,
-      ]}
+      style={[base, style]}
       {...rest}
     />
   );
