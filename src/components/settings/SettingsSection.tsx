@@ -9,6 +9,8 @@ export type SettingsSectionProps = {
   description?: string;
   /** Shown in the header next to the title (e.g. work-in-progress). */
   titleNote?: string;
+  /** Rendered after the section title (e.g. info (i) for longer help). */
+  titleTrailing?: React.ReactNode;
   children: React.ReactNode;
 };
 
@@ -16,13 +18,14 @@ export type SettingsSectionProps = {
  * Groups settings rows inside a card with a section heading.
  * TODO: Replace local section copy with i18n keys if the app adds translations.
  */
-export function SettingsSection({ title, description, titleNote, children }: SettingsSectionProps) {
+export function SettingsSection({ title, description, titleNote, titleTrailing, children }: SettingsSectionProps) {
   const { spacing: sp } = useTheme();
   return (
     <View style={{ marginBottom: sp.lg, paddingHorizontal: sp.gutter }}>
       <SectionTitle
         title={title}
         titleNote={titleNote}
+        titleTrailing={titleTrailing}
         subtitle={description}
         style={{ marginBottom: sp.md }}
       />

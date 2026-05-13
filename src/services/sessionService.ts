@@ -341,6 +341,26 @@ export async function unpinSessionTask(
   await memberRef.update({ tasks });
 }
 
+/**
+ * Update editable fields on a session task (title, estimate). Does not touch timers or pin state.
+ * TODO: Extend when session tasks persist reminder / visibility metadata.
+ */
+export async function updateSessionTask(
+  sessionId: string,
+  userId: string,
+  taskId: string,
+  updates: { title: string; estimatedMs: number | null },
+): Promise<void> {
+  const memberRef = membersCol(sessionId).doc(userId);
+  const doc = await memberRef.get();
+  if (!doc.exists) { return; }
+  const member = doc.data() as SessionMember;
+  const tasks = member.tasks.map(t =>
+    t.taskId === taskId ? { ...t, title: updates.title, estimatedMs: updates.estimatedMs } : t,
+  );
+  await memberRef.update({ tasks });
+}
+
 // setActiveTask is kept for backward compat but is no longer used directly —
 // position #1 is always the activeTaskId now.
 export async function setActiveTask(

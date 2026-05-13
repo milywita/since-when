@@ -13,6 +13,7 @@ import {
   reorderSessionTasks as svcReorderTasks,
   pinSessionTask as svcPinTask,
   unpinSessionTask as svcUnpinTask,
+  updateSessionTask as svcUpdateSessionTask,
   sendReaction as svcSendReaction,
 } from '../services/sessionService';
 import { setActiveSession } from '../services/userService';
@@ -135,6 +136,12 @@ export function useSession(sessionId: string) {
     [sessionId, userId],
   );
 
+  const updateTaskFields = useCallback(
+    (taskId: string, updates: { title: string; estimatedMs: number | null }) =>
+      svcUpdateSessionTask(sessionId, userId, taskId, updates),
+    [sessionId, userId],
+  );
+
   const sendReaction = useCallback(
     (toUserId: string, taskId: string, text: string) => {
       if (!canReact(taskId)) {
@@ -240,6 +247,7 @@ export function useSession(sessionId: string) {
     reorderTasks,
     pinTask,
     unpinTask,
+    updateTaskFields,
     sendReaction,
     syncMyTasksToSolo,
     finalizeSession,

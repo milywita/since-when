@@ -70,7 +70,8 @@ export type SettingsDefaults = {
 /** Shared defaults used by both Settings preview UI and task creation draft state. */
 export const SETTINGS_DEFAULTS: SettingsDefaults = {
   sarcasmLevel: 'sarcastic',
-  reminderPreset: 'silent',
+  /** Matches Settings → Reminder Frequency default (placeholder until settings persist). */
+  reminderPreset: 'normal',
   taskPriority: 'normal',
   taskType: 'Other',
   togetherVisibility: 'visible',

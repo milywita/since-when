@@ -33,9 +33,9 @@ export function useTasks() {
   const completedTasks = tasks.filter(t => t.completedAt !== null);
 
   const addTask = useCallback(
-    (title: string, estimatedMs: number | null) => {
+    (title: string, estimatedMs: number | null, options?: { isPublic?: boolean }) => {
       if (!userId) { return Promise.resolve(); }
-      return svcAdd(userId, title, estimatedMs, activeTasks.length);
+      return svcAdd(userId, title, estimatedMs, activeTasks.length, options);
     },
     [userId, activeTasks.length],
   );
@@ -57,7 +57,7 @@ export function useTasks() {
   );
 
   const updateTask = useCallback(
-    (taskId: string, changes: { title?: string; estimatedMs?: number | null }) => {
+    (taskId: string, changes: { title?: string; estimatedMs?: number | null; isPublic?: boolean }) => {
       if (!userId) { return Promise.resolve(); }
       return svcUpdate(userId, taskId, changes);
     },

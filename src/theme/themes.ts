@@ -94,9 +94,11 @@ export const midnightMinimalPalette: ThemeColorPalette = {
   primaryText: '#0d0d0d',
   accent: '#6366f1',
   accentMuted: '#c7c8ff',
-  accentLight: '#8b8cf4',
-  accentSurface: '#13132a',
-  accentSurfaceBorder: '#2a2a4a',
+  /** Brighter periwinkle for borders and controls on dark tint panels. */
+  accentLight: '#a3a6ff',
+  /** Focus panels — a touch lighter so tint reads as a soft wash, not a heavy block. */
+  accentSurface: '#242448',
+  accentSurfaceBorder: '#4a4d9e',
   danger: '#c0392b',
   dangerMuted: '#8b2e2e',
   warning: '#d4a017',
@@ -139,10 +141,11 @@ export const pastelLightPalette: ThemeColorPalette = {
   /** Same indigo-periwinkle as dark theme — reads bluish, not magenta-purple. */
   accent: '#6366f1',
   accentMuted: '#c7c8ff',
-  accentLight: '#8b8cf4',
-  /** Chips, session focus, history cards — tinted accent panel. */
-  accentSurface: '#d0c4f2',
-  accentSurfaceBorder: '#b0a2dc',
+  /** Saturated enough to read on very light lavender surfaces. */
+  accentLight: '#6e72f5',
+  /** Chips, session focus — airy wash; pair with `accent` borders for separation from page. */
+  accentSurface: '#f1edfa',
+  accentSurfaceBorder: '#a69fe0',
   /** Classic saturated red on light surfaces (timers, swipe delete, overdue border). */
   danger: '#d32f2f',
   dangerMuted: '#e57373',

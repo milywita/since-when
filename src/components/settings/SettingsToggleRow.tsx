@@ -11,6 +11,8 @@ export type SettingsToggleRowProps = {
   showDivider?: boolean;
   /** TODO: Wire to real settings store / notification permissions. */
   accessibilityLabel?: string;
+  /** Optional (i) modal with longer explanation next to the title. */
+  infoHint?: { title: string; body: string };
 };
 
 export function SettingsToggleRow({
@@ -20,12 +22,14 @@ export function SettingsToggleRow({
   onValueChange,
   showDivider = true,
   accessibilityLabel,
+  infoHint,
 }: SettingsToggleRowProps) {
   const { colors: c } = useTheme();
   return (
     <SettingsRow
       title={title}
       description={description}
+      infoHint={infoHint}
       showDivider={showDivider}
       right={
         <Switch

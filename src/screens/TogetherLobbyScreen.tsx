@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState } from '../components/layout/EmptyState';
 import { ScreenHeader } from '../components/layout/ScreenHeader';
 import { ScreenHeaderBackButton } from '../components/layout/ScreenHeaderBackButton';
@@ -206,7 +207,8 @@ function PartnerRow({ partner, onJoin, joining }: PartnerRowProps) {
 export default function TogetherLobbyScreen({ navigation }: Props) {
   const thm = useTheme();
   const s = useMemo(() => buildStyles(thm), [thm]);
-  const { colors: c } = thm;
+  const { colors: c, spacing: sp, radius: r } = thm;
+  const lobbyInsets = useSafeAreaInsets();
   const user = auth().currentUser!;
 
   const { activeTasks, loading: tasksLoading } = useTasks();
@@ -547,50 +549,69 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
 
-        {/* ── Custom duration modal ── */}
+        {/* ── Custom duration (matches task form bottom sheet) ── */}
         <Modal
           visible={customModalVisible}
           transparent
-          animationType="slide"
+          animationType="fade"
           onRequestClose={() => setCustomModalVisible(false)}>
           <KeyboardAvoidingView
-            style={s.customModalOverlay}
+            style={s.customSheetHost}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <TouchableOpacity
-              style={s.customModalBackdrop}
+              style={s.customSheetBackdrop}
               activeOpacity={1}
               onPress={() => setCustomModalVisible(false)}
             />
-            <View style={s.customModalSheet}>
-              <View style={s.customModalHandle} />
-              <Text style={[s.customModalTitle, { color: c.text }]}>Custom duration</Text>
-              <Text style={[s.customModalSubtitle, { color: c.textSoft }]}>How many minutes?</Text>
-              <TextInput
-                style={s.customModalInput}
-                placeholder="e.g. 45"
-                placeholderTextColor={c.textSoft}
-                value={customInput}
-                onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
-                keyboardType="number-pad"
-                autoFocus
-                maxLength={4}
-              />
-              <TouchableOpacity
-                style={[
-                  s.actionBtn,
-                  (!customInput || parseInt(customInput, 10) < 1) && s.actionBtnDisabled,
-                ]}
-                disabled={!customInput || parseInt(customInput, 10) < 1}
-                onPress={() => {
-                  const mins = parseInt(customInput, 10);
-                  if (mins >= 1) {
-                    setSelectedDurationMs(mins * 60 * 1000);
-                    setCustomModalVisible(false);
-                    setCustomInput('');
-                  }
-                }}>
-                <Text style={s.actionBtnText}>Set duration</Text>
-              </TouchableOpacity>
+            <View
+              style={[
+                s.customSheetCard,
+                {
+                  marginBottom: lobbyInsets.bottom + 40,
+                  backgroundColor: c.surfaceRaised,
+                  borderColor: c.border,
+                },
+              ]}>
+              <View style={[s.customSheetHandle, { backgroundColor: c.borderStrong }]} />
+              <View style={{ padding: sp.xl, gap: 14 }}>
+                <Text style={[s.customSheetTitle, { color: c.text }]}>Custom duration</Text>
+                <Text style={[s.customSheetSubtitle, { color: c.textSoft }]}>How many minutes?</Text>
+                <TextInput
+                  style={[
+                    s.customSheetInput,
+                    {
+                      backgroundColor: c.surface,
+                      color: c.text,
+                      borderColor: c.border,
+                      borderRadius: r.sm,
+                    },
+                  ]}
+                  placeholder="e.g. 45"
+                  placeholderTextColor={c.textSoft}
+                  value={customInput}
+                  onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  autoFocus
+                  maxLength={4}
+                />
+                <TouchableOpacity
+                  style={[
+                    s.customSheetPrimaryBtn,
+                    { backgroundColor: c.primary },
+                    (!customInput || parseInt(customInput, 10) < 1) && { opacity: 0.45 },
+                  ]}
+                  disabled={!customInput || parseInt(customInput, 10) < 1}
+                  onPress={() => {
+                    const mins = parseInt(customInput, 10);
+                    if (mins >= 1) {
+                      setSelectedDurationMs(mins * 60 * 1000);
+                      setCustomModalVisible(false);
+                      setCustomInput('');
+                    }
+                  }}>
+                  <Text style={[s.customSheetPrimaryBtnText, { color: c.primaryText }]}>Set duration</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -693,41 +714,50 @@ function buildStyles(thm: AppTheme) {
     presetChipText: { color: c.textMuted, fontSize: 14, fontWeight: '500', textAlign: 'center' },
     presetChipTextSelected: { color: c.onAccent },
 
-    customModalOverlay: { flex: 1, justifyContent: 'flex-end' },
-    customModalBackdrop: {
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: c.backdrop,
+    customSheetHost: { flex: 1, justifyContent: 'flex-end' },
+    customSheetBackdrop: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: 'transparent',
     },
-    customModalSheet: {
-      backgroundColor: c.surfaceRaised,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingHorizontal: 24,
-      paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-      paddingTop: 16,
+    customSheetCard: {
+      marginHorizontal: 20,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: c.border,
-      gap: 12,
+      maxHeight: '80%',
+      overflow: 'hidden' as const,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      elevation: 12,
     },
-    customModalHandle: {
-      width: 36, height: 4, backgroundColor: c.borderStrong,
-      borderRadius: 2, alignSelf: 'center', marginBottom: 8,
+    customSheetHandle: {
+      width: 36,
+      height: 4,
+      borderRadius: 2,
+      alignSelf: 'center',
+      marginTop: 10,
+      marginBottom: 4,
     },
-    customModalTitle: { fontSize: 18, fontWeight: '600' },
-    customModalSubtitle: { fontSize: 14, marginTop: -4 },
-    customModalInput: {
-      backgroundColor: c.surface,
-      color: c.text,
-      borderRadius: r.sm,
+    customSheetTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+    customSheetSubtitle: { fontSize: 13 },
+    customSheetInput: {
       paddingHorizontal: 16,
       paddingVertical: 14,
-      fontSize: 28,
-      fontWeight: '600',
+      fontSize: 16,
       borderWidth: 1,
-      borderColor: c.border,
-      textAlign: 'center',
-      fontVariant: ['tabular-nums'],
+      minHeight: 52,
     },
+    customSheetPrimaryBtn: {
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    customSheetPrimaryBtnText: { fontSize: 16, fontWeight: '600' },
 
     actionBtn: {
       backgroundColor: c.primary,

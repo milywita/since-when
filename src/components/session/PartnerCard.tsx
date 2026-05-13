@@ -65,7 +65,7 @@ export function PartnerCard({
               {
                 backgroundColor: c.accentSurface,
                 borderRadius: r.sm,
-                borderColor: c.accentSurfaceBorder,
+                borderColor: c.accent,
                 padding: sp.md,
                 gap: sp.xs,
               },
@@ -81,7 +81,7 @@ export function PartnerCard({
               <Text
                 style={[
                   styles.partnerFocusTimer,
-                  { color: activeFocusMs > 86400 * 1000 ? c.dangerMuted : c.accentLight },
+                  { color: activeFocusMs > 86400 * 1000 ? c.dangerMuted : c.accent },
                 ]}>
                 {formatElapsed(activeFocusMs)}
               </Text>
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
   partnerName: { fontSize: 15, fontWeight: '600', flex: 1 },
   partnerTaskCount: { fontSize: 12 },
   partnerEmpty: { fontSize: 13 },
-  partnerFocusTask: { borderWidth: 1 },
+  partnerFocusTask: { borderWidth: 1.5 },
   partnerFocusHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   partnerFocusLabel: { fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
   partnerFocusTitle: { fontSize: 15, fontWeight: '500' },

@@ -47,7 +47,7 @@ export function SessionTimerCard({
         <Text
           style={[
             styles.focusTimer,
-            { color: (isOld || overEstimate) ? c.danger : c.accentLight },
+            { color: (isOld || overEstimate) ? c.danger : c.accent },
           ]}>
           {formatElapsed(elapsed)}
         </Text>
@@ -68,7 +68,7 @@ export function SessionTimerCard({
         <TouchableOpacity
           style={[styles.focusClearBtn, { borderColor: c.accentSurfaceBorder, paddingHorizontal: sp.lg }]}
           onPress={onClearFocus}>
-          <Text style={[styles.focusClearBtnText, { color: c.textSoft }]}>Clear focus</Text>
+          <Text style={[styles.focusClearBtnText, { color: c.textMuted }]}>Clear focus</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -17,7 +17,7 @@ import {
   SettingsToggleRow,
   SettingsOptionRow,
   SettingsPillOption,
-  TaskEstimatePresetsEditor,
+  SettingsInfoIcon,
 } from '../components/settings';
 import { useTheme } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
@@ -67,35 +67,45 @@ const REMINDER_META: {
   { id: 'silent', title: 'Silent', description: 'No automatic reminders.' },
   { id: 'normal', title: 'Normal', description: 'Due soon and overdue only.' },
   { id: 'annoyMe', title: 'Annoy Me', description: 'More frequent reminders with sarcasm.' },
-  { id: 'partnerOnly', title: 'Partner Only', description: 'Only partner nudges and reactions.' },
+  {
+    id: 'partnerOnly',
+    title: 'Partner Only',
+    description: 'Together Mode only — see section info for details.',
+  },
 ];
+
+const NOTIFICATIONS_SECTION_INFO_BODY =
+  'App reminders and partner reactions control two different kinds of pop-ups.\n\n' +
+  'If pop-ups are off for either option, those updates still appear quietly in the app feed without interrupting you.\n\n' +
+  'TODO: Connect to OS notification permissions and in-app feed routing when implemented.';
+
+const APP_REMINDERS_INFO_BODY =
+  'Sarcastic task pop-ups when a task is delayed too long or takes much longer than expected.\n\n' +
+  'Copy and timing follow your Sarcasm / Reminder Tone setting once scheduling is wired up.\n\n' +
+  'TODO: Tie pop-ups to delay and estimate thresholds when notifications ship.';
+
+const PARTNER_REACTIONS_INFO_BODY =
+  'Pop-ups when your Together Mode partner reacts or nudges you.\n\n' +
+  'When this is off, partner activity still appears in the app feed without interrupting you.\n\n' +
+  'TODO: Gate on active Together session and partner permissions when implemented.';
+
+const REMINDER_FREQUENCY_INFO_BODY =
+  'Reminder frequency sets how often and how strongly the app nudges you about tasks in general (placeholder until scheduling and notifications are wired up).\n\n' +
+  'Partner Only (Together Mode): the app should not send fallback reminders; only partner reactions and nudges can notify you. If partner reaction pop-ups are off, those updates appear quietly in the app feed.\n\n' +
+  'TODO: Allow each task to override the global reminder frequency when persistence ships.';
 
 export default function SettingsScreen({ navigation }: Props) {
   const thm = useTheme();
   const { colors: c, spacing: sp } = thm;
   const s = useMemo(() => buildStyles(thm), [thm]);
 
-  // TODO: Replace all useState below with user settings store (Firestore / AsyncStorage).
-  const [phoneNotifications, setPhoneNotifications] = useState(true);
-  const [inAppNotifications, setInAppNotifications] = useState(true);
-  const [importantTaskReminders, setImportantTaskReminders] = useState(true);
-  const [partnerReactions, setPartnerReactions] = useState(true);
+  // TODO: Replace useState below with persisted user settings (Firestore / AsyncStorage).
+  // TODO: Wire appReminders + partnerReactionPopups to real notification / in-feed routing when implemented.
+  const [appReminders, setAppReminders] = useState(true);
+  const [partnerReactionPopups, setPartnerReactionPopups] = useState(true);
 
   const [sarcasmLevel, setSarcasmLevel] = useState<SarcasmLevel>(SETTINGS_DEFAULTS.sarcasmLevel);
   const [reminderPreset, setReminderPreset] = useState<ReminderPreset>(SETTINGS_DEFAULTS.reminderPreset);
-
-  const [manualTimerStart, setManualTimerStart] = useState(false);
-  const [askBeforeOverdue, setAskBeforeOverdue] = useState(true);
-  const [countWaitingSeparately, setCountWaitingSeparately] = useState(true);
-  const [completeWithoutTimer, setCompleteWithoutTimer] = useState(true);
-
-  const [allowPartnerReactions, setAllowPartnerReactions] = useState(true);
-  const [allowPartnerNudges, setAllowPartnerNudges] = useState(true);
-  const [showActiveTaskToPartner, setShowActiveTaskToPartner] = useState(
-    SETTINGS_DEFAULTS.togetherVisibility === 'visible',
-  );
-  const [showOverdueToPartner, setShowOverdueToPartner] = useState(true);
-  const [appBackupNudges, setAppBackupNudges] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -131,42 +141,44 @@ export default function SettingsScreen({ navigation }: Props) {
           onScroll={handleScroll}
           scrollEventThrottle={32}>
           <Text style={[s.pageIntro, { color: c.textSoft }]}>
-            Tune nudges, tone, and Together visibility. Task time presets save on this device; other
-            sections are still preview-only.
+            Notification and reminder options below are preview-only until persistence ships. Nothing here
+            changes real push behavior yet.
           </Text>
 
           <SettingsSection
-            title="Notifications"
-            description="Control how Since When gets your attention.">
+            title="Notifications / Pop-ups"
+            description="Choose what may interrupt you versus what stays in the feed."
+            titleTrailing={
+              <SettingsInfoIcon
+                hintTitle="Notifications / Pop-ups"
+                hintBody={NOTIFICATIONS_SECTION_INFO_BODY}
+              />
+            }>
+            <View style={[s.notificationsHelper, { borderBottomColor: c.borderInner }]}>
+              <Text style={[s.notificationsHelperText, { color: c.textMuted }]}>
+                If pop-ups are off, updates should appear quietly in the app feed without interrupting the
+                user.
+              </Text>
+            </View>
             <SettingsToggleRow
-              title="Phone notifications"
-              description="Only for important reminders and partner activity."
-              value={phoneNotifications}
-              onValueChange={setPhoneNotifications}
+              title="App reminders"
+              description="Sarcastic task pop-ups when a task is delayed too long or takes much longer than expected."
+              value={appReminders}
+              onValueChange={setAppReminders}
+              infoHint={{ title: 'App reminders', body: APP_REMINDERS_INFO_BODY }}
             />
             <SettingsToggleRow
-              title="In-app notifications"
-              description="Show updates inside the app feed."
-              value={inAppNotifications}
-              onValueChange={setInAppNotifications}
-            />
-            <SettingsToggleRow
-              title="Important task reminders"
-              description="Due soon, overdue, and other time-sensitive alerts."
-              value={importantTaskReminders}
-              onValueChange={setImportantTaskReminders}
-            />
-            <SettingsToggleRow
-              title="Partner reactions & nudges"
-              description="When someone reacts to your task or pokes you."
-              value={partnerReactions}
-              onValueChange={setPartnerReactions}
+              title="Partner reactions"
+              description="Pop-ups when your Together Mode partner reacts or nudges you."
+              value={partnerReactionPopups}
+              onValueChange={setPartnerReactionPopups}
+              infoHint={{ title: 'Partner reactions', body: PARTNER_REACTIONS_INFO_BODY }}
               showDivider={false}
             />
           </SettingsSection>
 
           <SettingsSection
-            title="Sarcasm & reminder tone"
+            title="Sarcasm / Reminder Tone"
             description="How reminder copy will sound once scheduling is wired up.">
             {/* TODO: Allow tone overrides per task category/type. */}
             <View
@@ -214,115 +226,34 @@ export default function SettingsScreen({ navigation }: Props) {
                 Example: {SARCASM_DETAIL[sarcasmLevel].example}
               </Text>
             </View>
-            <View style={[s.toneSectionFooter, { borderTopColor: c.border, padding: sp.lg }]}>
-              <Text style={[s.toneSectionFooterText, { color: c.textSoft }]}>
-                Later, reminder tone can be customized per task type.
-              </Text>
-            </View>
           </SettingsSection>
 
-          {/* TODO: Allow each task to override the global reminder default. */}
+          {/* TODO: Allow each task to override the global reminder frequency. */}
+          {/* TODO: Partner Only — no fallback app reminders in Together Mode; honor Partner reactions pop-up toggle for quiet feed. */}
           <SettingsSection
-            title="Reminder defaults"
-            description="Default reminder style for new tasks. You can override this per task later.">
+            title="Reminder Frequency"
+            description="How often the app should remind you about tasks (placeholder only)."
+            titleTrailing={
+              <SettingsInfoIcon hintTitle="Reminder Frequency" hintBody={REMINDER_FREQUENCY_INFO_BODY} />
+            }>
             {REMINDER_META.map((row, index) => {
               const showDivider = index < REMINDER_META.length - 1;
-              const rowProps = {
-                title: row.title,
-                description: row.description,
-                selected: reminderPreset === row.id,
-                onPress: () => setReminderPreset(row.id),
-                showDivider,
-              };
-              if (row.id === 'partnerOnly') {
-                return (
-                  <React.Fragment key={row.id}>
-                    {/* TODO: Partner Only disables fallback app reminders for this preset. */}
-                    <SettingsOptionRow {...rowProps} />
-                  </React.Fragment>
-                );
-              }
-              return <SettingsOptionRow key={row.id} {...rowProps} />;
+              return (
+                <SettingsOptionRow
+                  key={row.id}
+                  title={row.title}
+                  description={row.description}
+                  selected={reminderPreset === row.id}
+                  onPress={() => setReminderPreset(row.id)}
+                  showDivider={showDivider}
+                />
+              );
             })}
             <View style={[s.reminderSectionFooter, { borderTopColor: c.border, padding: sp.lg }]}>
               <Text style={[s.reminderSectionFooterText, { color: c.textSoft }]}>
-                Note: each task will later be able to use its own reminder type.
+                Placeholder only — not saved yet.
               </Text>
             </View>
-          </SettingsSection>
-
-          <SettingsSection
-            title="Timer behavior"
-            titleNote="Work in progress"
-            description="How the clock behaves on your tasks.">
-            <SettingsToggleRow
-              title="Manual timer start"
-              description="Tasks do not start tracking until you press Start."
-              value={manualTimerStart}
-              onValueChange={setManualTimerStart}
-            />
-            <SettingsToggleRow
-              title="Ask before marking overdue"
-              description="Confirm before a planned task becomes overdue."
-              value={askBeforeOverdue}
-              onValueChange={setAskBeforeOverdue}
-            />
-            <SettingsToggleRow
-              title="Count waiting separately"
-              description="Separate procrastination time from active work time."
-              value={countWaitingSeparately}
-              onValueChange={setCountWaitingSeparately}
-            />
-            <SettingsToggleRow
-              title="Allow complete without timer"
-              description="Useful for tiny tasks finished quickly."
-              value={completeWithoutTimer}
-              onValueChange={setCompleteWithoutTimer}
-              showDivider={false}
-            />
-          </SettingsSection>
-
-          <SettingsSection
-            title="Task time presets"
-            description="Customize the time chips shown when creating tasks.">
-            <TaskEstimatePresetsEditor />
-          </SettingsSection>
-
-          <SettingsSection
-            title="Partner / shared mode"
-            titleNote="Work in progress"
-            description="What your partner can see and send.">
-            <SettingsToggleRow
-              title="Allow partner reactions"
-              description="Let your partner send quick reactions."
-              value={allowPartnerReactions}
-              onValueChange={setAllowPartnerReactions}
-            />
-            <SettingsToggleRow
-              title="Allow partner nudges"
-              description="Let your partner poke you when you are avoiding tasks."
-              value={allowPartnerNudges}
-              onValueChange={setAllowPartnerNudges}
-            />
-            <SettingsToggleRow
-              title="Show active task to partner"
-              description="Share what you are currently working on."
-              value={showActiveTaskToPartner}
-              onValueChange={setShowActiveTaskToPartner}
-            />
-            <SettingsToggleRow
-              title="Show overdue status to partner"
-              description="Let your partner see when tasks are late."
-              value={showOverdueToPartner}
-              onValueChange={setShowOverdueToPartner}
-            />
-            <SettingsToggleRow
-              title="App backup nudges"
-              description="If your partner is inactive, the app can step in."
-              value={appBackupNudges}
-              onValueChange={setAppBackupNudges}
-              showDivider={false}
-            />
           </SettingsSection>
 
           <View style={[s.accountBlock, { paddingHorizontal: sp.gutter }]}>
@@ -336,7 +267,8 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
 
           <Text style={[s.devNote, { color: c.textDim }]}>
-            Other sections above are preview-only (not saved). Task presets use this device only.
+            Preview-only controls are not saved. TODO: Restore a dedicated entry for task time presets if
+            we do not surface them in add-task flows.
           </Text>
         </ScrollView>
 
@@ -373,6 +305,16 @@ function buildStyles(thm: AppTheme) {
       paddingHorizontal: sp.gutter,
       marginBottom: sp.lg,
     },
+    notificationsHelper: {
+      paddingHorizontal: sp.lg,
+      paddingTop: sp.md,
+      paddingBottom: sp.md,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    notificationsHelperText: {
+      fontSize: 13,
+      lineHeight: 19,
+    },
     toneStrip: {},
     toneTwoRows: {
       alignSelf: 'stretch',
@@ -401,10 +343,6 @@ function buildStyles(thm: AppTheme) {
       borderTopWidth: StyleSheet.hairlineWidth,
     },
     reminderSectionFooterText: { fontSize: 12, lineHeight: 17 },
-    toneSectionFooter: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-    },
-    toneSectionFooterText: { fontSize: 12, lineHeight: 17 },
     accountBlock: { marginTop: sp.md, marginBottom: sp.sm },
     signOutBtn: {
       borderRadius: thm.radius.md,

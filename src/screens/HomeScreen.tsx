@@ -2,13 +2,11 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
+  Pressable,
   ScrollView,
   StyleSheet,
   Modal,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
   Animated,
 } from 'react-native';
@@ -21,7 +19,7 @@ import { useTheme, useThemeToggle } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
 import { EmptyState } from '../components/layout/EmptyState';
 import { ScreenHeader } from '../components/layout/ScreenHeader';
-import { TaskCard } from '../components/tasks/TaskCard';
+import { SwipeableRow } from '../components/SwipeableRow';
 import { useTasks } from '../hooks/useTasks';
 import { useSessionHistory } from '../hooks/useSessionHistory';
 import type { Task } from '../types/Task';
@@ -31,15 +29,8 @@ import { formatElapsed } from '../utils/formatElapsed';
 import { subscribeToUserProfile, setActiveSession } from '../services/userService';
 import { getSessionOnce } from '../services/sessionService';
 import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
-import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
-import { presetChipLabelFromMs, presetSpokenLabelFromMs } from '../utils/taskEstimatePresetLabel';
-import {
-  SETTINGS_DEFAULTS,
-  type ReminderPreset,
-  type TogetherVisibility,
-} from '../types/settingsPreferences';
-
-/** Full-screen modal host: same layout as `StyleSheet.absoluteFillObject` (RN typings often omit that alias). */
+import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
+import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -168,14 +159,32 @@ function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLon
   const estimatedSec = task.estimatedMs !== null ? task.estimatedMs / 1000 : null;
   const isOverEstimate = estimatedSec !== null && liveSeconds > estimatedSec;
 
+  /** #1 or pinned: timer runs; show the same selected row treatment. */
+  const isFocusedRow = isFirst || task.isPinned;
+
+  const rowBackground = isActive
+    ? c.surfaceRaised
+    : isFocusedRow
+      ? c.accentSurface
+      : c.surface;
+
+  /** Match SessionTimerCard: soft tint + strong purple frame. */
+  const rowBorderColor = isFocusedRow ? c.accent : c.border;
+  const rowBorderWidth = isFocusedRow ? 1.5 : 1;
+
+  const doneBtnStyle = isFocusedRow
+    ? { backgroundColor: c.accent, borderColor: c.accent, borderWidth: 1 }
+    : { backgroundColor: c.surfaceRaised, borderColor: c.borderStrong, borderWidth: 1 };
+  const doneLabelColor = isFocusedRow ? c.onAccent : c.text;
+
   return (
     <View
       style={[
         s.queueRow,
         {
-          backgroundColor: isActive ? c.surfaceRaised : c.surface,
-          borderColor: isFirst ? c.accent : task.isPinned ? c.accentLight : c.border,
-          borderWidth: isFirst || task.isPinned ? 1.5 : 1,
+          backgroundColor: rowBackground,
+          borderColor: rowBorderColor,
+          borderWidth: rowBorderWidth,
           opacity: isActive ? 0.95 : 1,
         },
       ]}>
@@ -184,19 +193,29 @@ function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLon
         <Text style={[s.dragHandleText, { color: c.textDim }]}>⠿</Text>
       </TouchableOpacity>
 
-      {/* position badge — tapping toggles pin on non-#1 tasks */}
-      <TouchableOpacity
-        style={[
-          s.queueBadge,
-          { backgroundColor: isFirst ? c.accent : task.isPinned ? c.accentSurface : (isDark ? c.surfaceInset : c.surfaceSoft) },
-        ]}
+      {/* position badge — tap toggles pin; focused (#1 or pinned) uses same purple as SessionTimerCard */}
+      <Pressable
         onPress={isFirst ? undefined : onTogglePin}
-        activeOpacity={isFirst ? 1 : 0.6}
-        hitSlop={6}>
-        <Text style={[s.queueBadgeText, { color: isFirst ? c.onAccent : task.isPinned ? c.accentLight : c.textMuted }]}>
+        hitSlop={6}
+        style={({ pressed }) => [
+          s.queueBadge,
+          {
+            backgroundColor: isFocusedRow
+              ? c.accent
+              : isDark
+                ? c.surfaceInset
+                : c.surfaceSoft,
+            opacity: pressed && !isFirst ? 0.88 : pressed && isFirst ? 0.92 : 1,
+          },
+        ]}>
+        <Text
+          style={[
+            s.queueBadgeText,
+            { color: isFocusedRow ? c.onAccent : c.textMuted },
+          ]}>
           {position}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
 
       {/* content — long press opens action sheet */}
       <TouchableOpacity style={s.queueContent} onLongPress={onLongPress} activeOpacity={1}>
@@ -207,7 +226,16 @@ function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLon
         {isTimerRunning ? (
           <View style={s.queueTimerRow}>
             <Text
-              style={[s.queueTimer, { color: isOverEstimate ? c.danger : isFirst ? c.accent : c.accentLight }]}
+              style={[
+                s.queueTimer,
+                {
+                  color: isOverEstimate
+                    ? c.danger
+                    : isFocusedRow
+                      ? c.accent
+                      : c.textMuted,
+                },
+              ]}
               numberOfLines={1}>
               {formatSeconds(liveSeconds)}
             </Text>
@@ -246,13 +274,23 @@ function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLon
         )}
       </TouchableOpacity>
 
-      {/* done button */}
-      <TouchableOpacity
-        style={[s.queueDoneBtn, { borderColor: c.border }]}
-        onPress={onComplete}
-        hitSlop={12}>
-        <Text style={[s.queueDoneBtnText, { color: c.textMuted }]}>Done</Text>
-      </TouchableOpacity>
+      <View style={s.queueRowActions}>
+        <TouchableOpacity
+          style={[s.queueEditBtn, { borderColor: c.border, backgroundColor: c.surface }]}
+          onPress={onEdit}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Edit task">
+          <Text style={[s.queueEditIcon, { color: c.textMuted }]}>✎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.queueDoneBtn, doneBtnStyle]}
+          onPress={onComplete}
+          hitSlop={12}
+          activeOpacity={0.85}>
+          <Text style={[s.queueDoneBtnText, { color: doneLabelColor }]}>Done</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -539,311 +577,6 @@ function buildHistorySections(
     }));
 }
 
-// ─── Add task modal ───────────────────────────────────────────────────────────
-
-type AddTaskModalProps = {
-  visible: boolean;
-  onClose: () => void;
-  onAdd: (title: string, estimatedMs: number | null) => Promise<void>;
-  timePresets: TaskEstimatePreset[];
-  c: AppTheme['colors'];
-  s: S;
-};
-
-const REMINDER_PRESET_OPTIONS: { id: ReminderPreset; label: string }[] = [
-  { id: 'silent', label: 'Silent' },
-  { id: 'normal', label: 'Normal' },
-  { id: 'annoyMe', label: 'Annoy Me' },
-  { id: 'partnerOnly', label: 'Partner Only' },
-];
-
-const TOGETHER_VISIBILITY_OPTIONS: { id: TogetherVisibility; label: string }[] = [
-  { id: 'visible', label: 'Visible in Together' },
-  { id: 'hidden', label: 'Hidden in Together' },
-];
-
-function VisibilityEyeIcon({ color, crossed }: { color: string; crossed: boolean }) {
-  return (
-    <View style={visibilityIconStyles.wrap}>
-      <View style={[visibilityIconStyles.eyeOutline, { borderColor: color }]} />
-      <View style={[visibilityIconStyles.pupil, { backgroundColor: color }]} />
-      {crossed ? (
-        <View
-          style={[
-            visibilityIconStyles.crossLine,
-            { backgroundColor: color, transform: [{ rotate: '-28deg' }] },
-          ]}
-        />
-      ) : null}
-    </View>
-  );
-}
-
-function stashAdvancedDraftForLater(draft: {
-  reminderPreset: ReminderPreset;
-  reminderPresetOverride: ReminderPreset | null;
-  togetherVisibility: TogetherVisibility;
-  togetherVisibilityOverride: TogetherVisibility | null;
-}) {
-  // TODO: Persist advanced task draft fields with task creation payload once task schema/backing service are ready.
-  // TODO: Keep this centralized so task creation and edit flows share the same override mapping behavior.
-  // TODO: Add taskType/category field later for database, statistics, and task-type-based reminder behavior.
-  return draft;
-}
-
-function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskModalProps) {
-  const insets = useSafeAreaInsets();
-  const [text, setText] = useState('');
-  const [selectedMs, setSelectedMs] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [reminderPresetOverride, setReminderPresetOverride] = useState<ReminderPreset | null>(null);
-  const [togetherVisibilityOverride, setTogetherVisibilityOverride] = useState<TogetherVisibility | null>(null);
-  const selectedReminderPreset = reminderPresetOverride ?? SETTINGS_DEFAULTS.reminderPreset;
-  const selectedTogetherVisibility = togetherVisibilityOverride ?? SETTINGS_DEFAULTS.togetherVisibility;
-
-  function resetDraft() {
-    setText('');
-    setSelectedMs(null);
-    setAdvancedOpen(false);
-    setReminderPresetOverride(null);
-    setTogetherVisibilityOverride(null);
-  }
-
-  async function handleAdd() {
-    const trimmed = text.trim();
-    if (!trimmed) { return; }
-    const taskCreationAdvancedDraft = {
-      reminderPreset: selectedReminderPreset,
-      reminderPresetOverride,
-      togetherVisibility: selectedTogetherVisibility,
-      togetherVisibilityOverride,
-    };
-    stashAdvancedDraftForLater(taskCreationAdvancedDraft);
-    // TODO: Use `taskCreationAdvancedDraft.reminderPreset` to drive per-task reminder scheduling when notifications ship.
-    // TODO: Enforce `taskCreationAdvancedDraft.togetherVisibility` in Together mode permissions/filtering once backend support is added.
-    setSaving(true);
-    try {
-      await onAdd(trimmed, selectedMs);
-      resetDraft();
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleClose() {
-    resetDraft();
-    onClose();
-  }
-
-  const cardBottom = insets.bottom + 100;
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={s.popupHost}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={handleClose} />
-        <View style={[s.popupCard, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
-          <ScrollView
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={s.popupScroll}>
-            <Text style={[s.popupTitle, { color: c.text }]}>What have you been avoiding?</Text>
-            <TextInput
-              style={s.modalInput}
-              placeholder="e.g. Reply to that email"
-              placeholderTextColor={c.textSoft}
-              value={text}
-              onChangeText={setText}
-              autoFocus
-              multiline
-              maxLength={120}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={handleAdd}
-            />
-            <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-            <View style={s.presetRow}>
-              {timePresets.map((p, idx) => (
-                <TouchableOpacity
-                  key={`${idx}-${p.ms}`}
-                  style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                  onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selectedMs === p.ms }}
-                  accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
-                  <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                    {presetChipLabelFromMs(p.ms)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={s.advancedToggleRow}
-              onPress={() => setAdvancedOpen(prev => !prev)}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: advancedOpen }}>
-              <Text style={[s.advancedToggleLabel, { color: c.textSoft }]}>Advanced options</Text>
-              <Text style={[s.advancedToggleChevron, { color: c.textDim }]}>
-                {advancedOpen ? '▲' : '▼'}
-              </Text>
-            </TouchableOpacity>
-            {advancedOpen && (
-              <View style={s.advancedCard}>
-                <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Reminder preset</Text>
-                <View style={s.advancedChipRow}>
-                  {REMINDER_PRESET_OPTIONS.map(opt => (
-                    <TouchableOpacity
-                      key={opt.id}
-                      style={[s.advancedChip, selectedReminderPreset === opt.id && s.advancedChipSelected]}
-                      onPress={() => setReminderPresetOverride(opt.id)}>
-                      <Text
-                        style={[
-                          s.advancedChipText,
-                          { color: selectedReminderPreset === opt.id ? c.primaryText : c.textMuted },
-                        ]}>
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Together Mode visibility</Text>
-                <View style={s.advancedChipRow}>
-                  {TOGETHER_VISIBILITY_OPTIONS.map(opt => (
-                    <TouchableOpacity
-                      key={opt.id}
-                      style={[s.advancedChip, selectedTogetherVisibility === opt.id && s.advancedChipSelected]}
-                      onPress={() => setTogetherVisibilityOverride(opt.id)}>
-                      <View style={s.advancedChipContent}>
-                        <VisibilityEyeIcon
-                          color={selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted}
-                          crossed={opt.id === 'hidden'}
-                        />
-                        <Text
-                          style={[
-                            s.advancedChipText,
-                            { color: selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted },
-                          ]}>
-                          {opt.label}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-              onPress={handleAdd}
-              disabled={!text.trim() || saving}>
-              {saving
-                ? <ActivityIndicator color={c.primaryText} />
-                : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Start the clock</Text>}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-// ─── Edit task modal ──────────────────────────────────────────────────────────
-
-type EditTaskModalProps = {
-  task: Task | null;
-  onClose: () => void;
-  onSave: (taskId: string, title: string, estimatedMs: number | null) => Promise<void>;
-  timePresets: TaskEstimatePreset[];
-  c: AppTheme['colors'];
-  s: S;
-};
-
-function EditTaskModal({ task, onClose, onSave, timePresets, c, s }: EditTaskModalProps) {
-  const insets = useSafeAreaInsets();
-  const [text, setText] = useState('');
-  const [selectedMs, setSelectedMs] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (task) {
-      setText(task.title);
-      setSelectedMs(task.estimatedMs);
-    }
-  }, [task]);
-
-  async function handleSave() {
-    const trimmed = text.trim();
-    if (!trimmed || !task) { return; }
-    setSaving(true);
-    try {
-      await onSave(task.id, trimmed, selectedMs);
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const cardBottom = insets.bottom + 100;
-
-  return (
-    <Modal visible={task !== null} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={s.popupHost}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={onClose} />
-        <View style={[s.popupCard, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
-          <ScrollView
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={s.popupScroll}>
-            <Text style={[s.popupTitle, { color: c.text }]}>Edit task</Text>
-            <TextInput
-              style={s.modalInput}
-              placeholderTextColor={c.textSoft}
-              value={text}
-              onChangeText={setText}
-              autoFocus
-              multiline
-              maxLength={120}
-              returnKeyType="done"
-              blurOnSubmit
-              onSubmitEditing={handleSave}
-            />
-            <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-            <View style={s.presetRow}>
-              {timePresets.map((p, idx) => (
-                <TouchableOpacity
-                  key={`${idx}-${p.ms}`}
-                  style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                  onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: selectedMs === p.ms }}
-                  accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
-                  <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                    {presetChipLabelFromMs(p.ms)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <TouchableOpacity
-              style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-              onPress={handleSave}
-              disabled={!text.trim() || saving}>
-              {saving
-                ? <ActivityIndicator color={c.primaryText} />
-                : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Save changes</Text>}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 // ─── Flash banner ─────────────────────────────────────────────────────────────
 
 function useDoneFlash() {
@@ -869,7 +602,7 @@ type Props = AppScreenProps<'Home'>;
 
 export default function HomeScreen({ navigation }: Props) {
   const thm = useTheme();
-  const { colors: c } = thm;
+  const { colors: c, radius } = thm;
   const { isDark, toggleTheme } = useThemeToggle();
   const s = useMemo(() => buildStyles(thm, isDark), [thm, isDark]);
   const { presets: timePresets } = useTaskEstimatePresets();
@@ -954,8 +687,18 @@ export default function HomeScreen({ navigation }: Props) {
     }
   }
 
-  async function handleEdit(taskId: string, title: string, estimatedMs: number | null) {
-    await updateTask(taskId, { title, estimatedMs });
+  async function handleEdit(taskId: string, payload: TaskFormCommitPayload) {
+    await updateTask(taskId, {
+      title: payload.title,
+      estimatedMs: payload.estimatedMs,
+      isPublic: payload.togetherVisibility === 'visible',
+    });
+  }
+
+  async function handleCreateTask(payload: TaskFormCommitPayload) {
+    await addTask(payload.title, payload.estimatedMs, {
+      isPublic: payload.togetherVisibility === 'visible',
+    });
   }
 
   if (loading) {
@@ -1087,21 +830,26 @@ export default function HomeScreen({ navigation }: Props) {
                 keyExtractor={t => t.id}
                 renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Task>) => (
                   <ScaleDecorator>
-                    <QueueTaskRow
-                      task={item}
-                      position={(getIndex() ?? 0) + 1}
-                      now={now}
-                      onComplete={() => handleComplete(item)}
+                    <SwipeableRow
+                      borderRadius={radius.md}
                       onDelete={() => handleDelete(item)}
-                      onEdit={() => setEditingTask(item)}
-                      onLongPress={() => setActionSheetTask(item)}
-                      onTogglePin={() => handleTogglePin(item)}
-                      drag={drag}
-                      isActive={isActive}
-                      c={c}
-                      s={s}
-                      isDark={isDark}
-                    />
+                      dragHandleReserveWidth={56}>
+                      <QueueTaskRow
+                        task={item}
+                        position={(getIndex() ?? 0) + 1}
+                        now={now}
+                        onComplete={() => handleComplete(item)}
+                        onDelete={() => handleDelete(item)}
+                        onEdit={() => setEditingTask(item)}
+                        onLongPress={() => setActionSheetTask(item)}
+                        onTogglePin={() => handleTogglePin(item)}
+                        drag={drag}
+                        isActive={isActive}
+                        c={c}
+                        s={s}
+                        isDark={isDark}
+                      />
+                    </SwipeableRow>
                   </ScaleDecorator>
                 )}
                 onDragEnd={({ data }) => reorderTasks(data, activeTasks[0] ?? null)}
@@ -1188,28 +936,59 @@ export default function HomeScreen({ navigation }: Props) {
         </TouchableOpacity>
       )}
 
-      <AddTaskModal
+      <TaskFormBottomSheet
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
-        onAdd={(title, estimatedMs) => addTask(title, estimatedMs)}
+        mode="create"
+        syncKey={modalVisible ? 'home-create' : undefined}
+        sheetTitle="What are you avoiding?"
+        titlePlaceholder="e.g. Reply to that email"
+        estimatePrompt="How long will it take?"
+        submitLabel="Start the clock"
         timePresets={timePresets}
-        c={c}
-        s={s}
+        initial={{
+          reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+          togetherVisibility: SETTINGS_DEFAULTS.togetherVisibility,
+        }}
+        onCommit={async payload => {
+          await handleCreateTask(payload);
+        }}
       />
 
-      <EditTaskModal
-        task={editingTask}
+      <TaskFormBottomSheet
+        visible={editingTask !== null}
         onClose={() => setEditingTask(null)}
-        onSave={handleEdit}
+        mode="edit"
+        syncKey={editingTask?.id}
+        sheetTitle="Edit task"
+        titlePlaceholder="Task title"
+        estimatePrompt="How long will it take?"
+        submitLabel="Save changes"
         timePresets={timePresets}
-        c={c}
-        s={s}
+        initial={
+          editingTask
+            ? {
+                title: editingTask.title,
+                estimatedMs: editingTask.estimatedMs,
+                reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+                togetherVisibility: editingTask.isPublic ? 'visible' : 'hidden',
+              }
+            : undefined
+        }
+        onCommit={async payload => {
+          if (!editingTask) { return; }
+          await handleEdit(editingTask.id, payload);
+        }}
       />
 
       <TaskActionSheet
         task={actionSheetTask}
         onClose={() => setActionSheetTask(null)}
-        onEdit={() => { setEditingTask(actionSheetTask); setActionSheetTask(null); }}
+        onEdit={() => {
+          const t = actionSheetTask;
+          setActionSheetTask(null);
+          if (t) { setEditingTask(t); }
+        }}
         onComplete={() => actionSheetTask && handleComplete(actionSheetTask)}
         onDelete={() => actionSheetTask && handleDelete(actionSheetTask)}
         c={c}
@@ -1274,33 +1053,6 @@ const themeIconStyles = StyleSheet.create({
     borderRadius: 5,
     top: 1,
     right: 1,
-  },
-});
-
-const visibilityIconStyles = StyleSheet.create({
-  wrap: {
-    width: 14,
-    height: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  eyeOutline: {
-    position: 'absolute',
-    width: 12,
-    height: 8,
-    borderWidth: 1.4,
-    borderRadius: 6,
-  },
-  pupil: {
-    width: 3.5,
-    height: 3.5,
-    borderRadius: 1.75,
-  },
-  crossLine: {
-    position: 'absolute',
-    width: 14,
-    height: 1.5,
-    borderRadius: 1,
   },
 });
 
@@ -1456,6 +1208,21 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     queueTimerRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
     queueTimer: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
     queueEstimate: { fontSize: 12, fontVariant: ['tabular-nums'] },
+    queueRowActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flexShrink: 0,
+    },
+    queueEditBtn: {
+      borderRadius: r.sm,
+      borderWidth: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    queueEditIcon: { fontSize: 16, fontWeight: '500', lineHeight: 20 },
     queueDoneBtn: {
       borderRadius: r.sm,
       borderWidth: 1,
@@ -1463,7 +1230,7 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
       paddingHorizontal: 12,
       flexShrink: 0,
     },
-    queueDoneBtnText: { fontSize: 13, fontWeight: '500' },
+    queueDoneBtnText: { fontSize: 13, fontWeight: '600' },
 
     // FAB
     fab: {

@@ -29,6 +29,7 @@ export async function addTask(
   title: string,
   estimatedMs: number | null,
   activeTaskCount: number,
+  options?: { isPublic?: boolean },
 ): Promise<void> {
   const col = tasksCollection(userId);
   // Find the highest existing position across all tasks (no where clause = no composite index needed).
@@ -52,7 +53,7 @@ export async function addTask(
     createdAt: Date.now(),
     completedAt: null,
     estimatedMs,
-    isPublic: false,
+    isPublic: options?.isPublic ?? false,
     position: maxPosition + 1,
     isPinned: false,
     accumulatedSeconds: 0,
@@ -143,7 +144,7 @@ export async function completeTask(
 export async function updateTask(
   userId: string,
   taskId: string,
-  changes: { title?: string; estimatedMs?: number | null },
+  changes: { title?: string; estimatedMs?: number | null; isPublic?: boolean },
 ): Promise<void> {
   await tasksCollection(userId).doc(taskId).update(changes);
 }

@@ -18,9 +18,25 @@ type Props = {
   onDelete: () => void;
   borderRadius?: number;
   style?: StyleProp<ViewStyle>;
+  /**
+   * When > 0, horizontal swipes that began in this many px from the left edge of the row
+   * are ignored (so e.g. a reorder drag handle can keep priority). Matches af01e4f behavior
+   * when 0; only needed for DraggableFlatList queue rows.
+   */
+  dragHandleReserveWidth?: number;
 };
 
-export function SwipeableRow({ children, onDelete, borderRadius = 12, style }: Props) {
+/**
+ * Same pattern as commit af01e4f: swipe left to expose red underlay + trash; pass threshold
+ * (or fast flick) and the row slides off, then `onDelete` runs.
+ */
+export function SwipeableRow({
+  children,
+  onDelete,
+  borderRadius = 12,
+  style,
+  dragHandleReserveWidth = 0,
+}: Props) {
   const { colors: c } = useTheme();
   const translateX = useRef(new Animated.Value(0)).current;
 
@@ -33,8 +49,15 @@ export function SwipeableRow({ children, onDelete, borderRadius = 12, style }: P
 
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, { dx, dy }) =>
-        dx < -8 && Math.abs(dx) > Math.abs(dy) * 1.5,
+      onMoveShouldSetPanResponder: (evt, { dx, dy }) => {
+        if (dragHandleReserveWidth > 0) {
+          const touchStartX = evt.nativeEvent.locationX - dx;
+          if (touchStartX < dragHandleReserveWidth) {
+            return false;
+          }
+        }
+        return dx < -8 && Math.abs(dx) > Math.abs(dy) * 1.5;
+      },
       onPanResponderGrant: () => {
         translateX.stopAnimation();
       },

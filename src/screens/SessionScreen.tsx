@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Modal,
   KeyboardAvoidingView,
@@ -45,13 +46,12 @@ import {
   showSessionTimerNotificationNow,
 } from '../services/notificationService';
 import { TaskReactions } from '../components/session/TaskReactions';
+import { SwipeableRow } from '../components/SwipeableRow';
 import { formatElapsed } from '../utils/formatElapsed';
-import { presetChipLabelFromMs, presetSpokenLabelFromMs } from '../utils/taskEstimatePresetLabel';
-import {
-  SETTINGS_DEFAULTS,
-  type ReminderPreset,
-  type TogetherVisibility,
-} from '../types/settingsPreferences';
+import { presetChipLabelFromMs } from '../utils/taskEstimatePresetLabel';
+import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
+import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
+import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -104,224 +104,15 @@ const SESSION_TIME_PRESET_MS = [
   24 * 60 * 60 * 1000,
 ] as const;
 
+const SESSION_TASK_ESTIMATE_PRESETS: TaskEstimatePreset[] = SESSION_TIME_PRESET_MS.map(ms => ({
+  ms,
+  label: presetChipLabelFromMs(ms),
+}));
+
 // ─── Style factory type ───────────────────────────────────────────────────────
 
 type S = ReturnType<typeof buildStyles>;
 
-
-// ─── Add task modal ───────────────────────────────────────────────────────────
-
-const REMINDER_PRESET_OPTIONS: { id: ReminderPreset; label: string }[] = [
-  { id: 'silent', label: 'Silent' },
-  { id: 'normal', label: 'Normal' },
-  { id: 'annoyMe', label: 'Annoy Me' },
-  { id: 'partnerOnly', label: 'Partner Only' },
-];
-
-const TOGETHER_VISIBILITY_OPTIONS: { id: TogetherVisibility; label: string }[] = [
-  { id: 'visible', label: 'Visible in Together' },
-  { id: 'hidden', label: 'Hidden in Together' },
-];
-
-function VisibilityEyeIcon({ color, crossed }: { color: string; crossed: boolean }) {
-  return (
-    <View style={visibilityIconStyles.wrap}>
-      <View style={[visibilityIconStyles.eyeOutline, { borderColor: color }]} />
-      <View style={[visibilityIconStyles.pupil, { backgroundColor: color }]} />
-      {crossed ? (
-        <View style={[visibilityIconStyles.crossLine, { backgroundColor: color, transform: [{ rotate: '-28deg' }] }]} />
-      ) : null}
-    </View>
-  );
-}
-
-const visibilityIconStyles = StyleSheet.create({
-  wrap: { width: 14, height: 14, alignItems: 'center', justifyContent: 'center' },
-  eyeOutline: { position: 'absolute', width: 12, height: 8, borderWidth: 1.4, borderRadius: 6 },
-  pupil: { width: 3.5, height: 3.5, borderRadius: 1.75 },
-  crossLine: { position: 'absolute', width: 14, height: 1.5, borderRadius: 1 },
-});
-
-function stashAdvancedDraftForLater(draft: {
-  reminderPreset: ReminderPreset;
-  reminderPresetOverride: ReminderPreset | null;
-  togetherVisibility: TogetherVisibility;
-  togetherVisibilityOverride: TogetherVisibility | null;
-}) {
-  // TODO: Wire advanced fields into session task creation once task schema supports them.
-  return draft;
-}
-
-type AddTaskModalProps = {
-  visible: boolean;
-  onClose: () => void;
-  onAdd: (title: string, estimatedMs: number | null) => Promise<void>;
-  atLimit: boolean;
-  c: AppTheme['colors'];
-  s: S;
-};
-
-function AddTaskModal({ visible, onClose, onAdd, atLimit, c, s }: AddTaskModalProps) {
-  const insets = useSafeAreaInsets();
-  const [text, setText] = useState('');
-  const [selectedMs, setSelectedMs] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [reminderPresetOverride, setReminderPresetOverride] = useState<ReminderPreset | null>(null);
-  const [togetherVisibilityOverride, setTogetherVisibilityOverride] = useState<TogetherVisibility | null>(null);
-  const selectedReminderPreset = reminderPresetOverride ?? SETTINGS_DEFAULTS.reminderPreset;
-  const selectedTogetherVisibility = togetherVisibilityOverride ?? SETTINGS_DEFAULTS.togetherVisibility;
-
-  function resetDraft() {
-    setText('');
-    setSelectedMs(null);
-    setAdvancedOpen(false);
-    setReminderPresetOverride(null);
-    setTogetherVisibilityOverride(null);
-  }
-
-  async function handleAdd() {
-    const trimmed = text.trim();
-    if (!trimmed) { return; }
-    stashAdvancedDraftForLater({
-      reminderPreset: selectedReminderPreset,
-      reminderPresetOverride,
-      togetherVisibility: selectedTogetherVisibility,
-      togetherVisibilityOverride,
-    });
-    setSaving(true);
-    try {
-      await onAdd(trimmed, selectedMs);
-      resetDraft();
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleClose() {
-    resetDraft();
-    onClose();
-  }
-
-  const cardBottom = insets.bottom + 100;
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={s.popupHost}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={handleClose} />
-        <View style={[s.popupCard, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
-          <ScrollView
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={s.popupScroll}>
-            {atLimit ? (
-              <>
-                <Text style={[s.popupTitle, { color: c.text }]}>Task limit reached</Text>
-                <Text style={[s.modalSubtitle, { color: c.textSoft }]}>
-                  You can bring up to {MAX_SESSION_TASKS} tasks into a session.
-                </Text>
-                <TouchableOpacity style={s.modalCloseBtn} onPress={handleClose}>
-                  <Text style={[s.modalCloseBtnText, { color: c.text }]}>Got it</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={[s.popupTitle, { color: c.text }]}>What are you working on?</Text>
-                <TextInput
-                  style={s.modalInput}
-                  placeholder="e.g. Fix the login bug"
-                  placeholderTextColor={c.textSoft}
-                  value={text}
-                  onChangeText={setText}
-                  autoFocus
-                  multiline
-                  maxLength={120}
-                  returnKeyType="done"
-                  blurOnSubmit
-                  onSubmitEditing={handleAdd}
-                />
-                <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it take?</Text>
-                <View style={s.estimateRow}>
-                  {SESSION_TIME_PRESET_MS.map(ms => (
-                    <TouchableOpacity
-                      key={ms}
-                      style={[s.estimateChip, selectedMs === ms && s.estimateChipSelected]}
-                      onPress={() => setSelectedMs(prev => prev === ms ? null : ms)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: selectedMs === ms }}
-                      accessibilityLabel={presetSpokenLabelFromMs(ms)}>
-                      <Text style={[s.estimateChipText, selectedMs === ms && s.estimateChipTextSelected]}>
-                        {presetChipLabelFromMs(ms)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <TouchableOpacity
-                  style={s.advancedToggleRow}
-                  onPress={() => setAdvancedOpen(prev => !prev)}
-                  accessibilityRole="button"
-                  accessibilityState={{ expanded: advancedOpen }}>
-                  <Text style={[s.advancedToggleLabel, { color: c.textSoft }]}>Advanced options</Text>
-                  <Text style={[s.advancedToggleChevron, { color: c.textDim }]}>
-                    {advancedOpen ? '▲' : '▼'}
-                  </Text>
-                </TouchableOpacity>
-                {advancedOpen && (
-                  <View style={s.advancedCard}>
-                    <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Reminder preset</Text>
-                    <View style={s.advancedChipRow}>
-                      {REMINDER_PRESET_OPTIONS.map(opt => (
-                        <TouchableOpacity
-                          key={opt.id}
-                          style={[s.advancedChip, selectedReminderPreset === opt.id && s.advancedChipSelected]}
-                          onPress={() => setReminderPresetOverride(opt.id)}>
-                          <Text style={[s.advancedChipText, { color: selectedReminderPreset === opt.id ? c.primaryText : c.textMuted }]}>
-                            {opt.label}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                    <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Together Mode visibility</Text>
-                    <View style={s.advancedChipRow}>
-                      {TOGETHER_VISIBILITY_OPTIONS.map(opt => (
-                        <TouchableOpacity
-                          key={opt.id}
-                          style={[s.advancedChip, selectedTogetherVisibility === opt.id && s.advancedChipSelected]}
-                          onPress={() => setTogetherVisibilityOverride(opt.id)}>
-                          <View style={s.advancedChipContent}>
-                            <VisibilityEyeIcon
-                              color={selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted}
-                              crossed={opt.id === 'hidden'}
-                            />
-                            <Text style={[s.advancedChipText, { color: selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted }]}>
-                              {opt.label}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
-                <TouchableOpacity
-                  style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-                  onPress={handleAdd}
-                  disabled={!text.trim() || saving}>
-                  {saving
-                    ? <ActivityIndicator color={c.primaryText} />
-                    : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Add to session</Text>}
-                </TouchableOpacity>
-              </>
-            )}
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
 
 // ─── Reaction picker ──────────────────────────────────────────────────────────
 
@@ -547,6 +338,7 @@ type SessionQueueTaskRowProps = {
   receivedReactions: Reaction[];
   onComplete: () => void;
   onDelete: () => void;
+  onEdit: () => void;
   onLongPress: () => void;
   onTogglePin: () => void;
   drag: () => void;
@@ -557,11 +349,12 @@ type SessionQueueTaskRowProps = {
 
 function SessionQueueTaskRow({
   task, position, now, receivedReactions,
-  onComplete, onDelete, onLongPress, onTogglePin,
+  onComplete, onDelete, onEdit, onLongPress, onTogglePin,
   drag, isActive, c, s,
 }: SessionQueueTaskRowProps) {
   const isFirst = position === 1;
-  const isTimerRunning = isFirst || (task.isPinned ?? false);
+  const isPinned = task.isPinned ?? false;
+  const isTimerRunning = isFirst || isPinned;
 
   const liveSeconds = isTimerRunning
     ? (task.accumulatedSeconds ?? 0) +
@@ -572,14 +365,30 @@ function SessionQueueTaskRow({
   const estimatedSec = task.estimatedMs !== null ? task.estimatedMs / 1000 : null;
   const isOverEstimate = estimatedSec !== null && liveSeconds > estimatedSec;
 
+  /** #1 or pinned: timer runs; same selected row styling as Solo. */
+  const isFocusedRow = isFirst || isPinned;
+
+  const rowBackground = isActive
+    ? c.surfaceRaised
+    : isFocusedRow
+      ? c.accentSurface
+      : c.surface;
+
+  const rowBorderColor = isFocusedRow ? c.accent : c.border;
+  const rowBorderWidth = isFocusedRow ? 1.5 : 1;
+  const doneBtnStyle = isFocusedRow
+    ? { backgroundColor: c.accent, borderColor: c.accent, borderWidth: 1 }
+    : { backgroundColor: c.surfaceRaised, borderColor: c.borderStrong, borderWidth: 1 };
+  const doneLabelColor = isFocusedRow ? c.onAccent : c.text;
+
   return (
     <View
       style={[
         s.sqRow,
         {
-          backgroundColor: isActive ? c.surfaceRaised : c.surface,
-          borderColor: isFirst ? c.accent : (task.isPinned ?? false) ? c.accentLight : c.border,
-          borderWidth: isFirst || (task.isPinned ?? false) ? 1.5 : 1,
+          backgroundColor: rowBackground,
+          borderColor: rowBorderColor,
+          borderWidth: rowBorderWidth,
           opacity: isActive ? 0.95 : 1,
         },
       ]}>
@@ -589,18 +398,20 @@ function SessionQueueTaskRow({
       </TouchableOpacity>
 
       {/* position badge — tap to toggle pin */}
-      <TouchableOpacity
-        style={[
-          s.sqBadge,
-          { backgroundColor: isFirst ? c.accent : (task.isPinned ?? false) ? c.accentSurface : c.surfaceSoft },
-        ]}
+      <Pressable
         onPress={isFirst ? undefined : onTogglePin}
-        activeOpacity={isFirst ? 1 : 0.6}
-        hitSlop={6}>
-        <Text style={[s.sqBadgeText, { color: isFirst ? c.onAccent : (task.isPinned ?? false) ? c.accentLight : c.textMuted }]}>
+        hitSlop={6}
+        style={({ pressed }) => [
+          s.sqBadge,
+          {
+            backgroundColor: isFocusedRow ? c.accent : c.surfaceSoft,
+            opacity: pressed && !isFirst ? 0.88 : pressed && isFirst ? 0.92 : 1,
+          },
+        ]}>
+        <Text style={[s.sqBadgeText, { color: isFocusedRow ? c.onAccent : c.textMuted }]}>
           {position}
         </Text>
-      </TouchableOpacity>
+      </Pressable>
 
       {/* content */}
       <TouchableOpacity style={s.sqContent} onLongPress={onLongPress} activeOpacity={1}>
@@ -608,7 +419,17 @@ function SessionQueueTaskRow({
 
         {isTimerRunning ? (
           <View style={s.sqTimerRow}>
-            <Text style={[s.sqTimer, { color: isOverEstimate ? c.danger : isFirst ? c.accent : c.accentLight }]}>
+            <Text
+              style={[
+                s.sqTimer,
+                {
+                  color: isOverEstimate
+                    ? c.danger
+                    : isFocusedRow
+                      ? c.accent
+                      : c.textMuted,
+                },
+              ]}>
               {formatSeconds(liveSeconds)}
             </Text>
             {estimatedSec !== null && (
@@ -640,13 +461,23 @@ function SessionQueueTaskRow({
         )}
       </TouchableOpacity>
 
-      {/* done button */}
-      <TouchableOpacity
-        style={[s.sqDoneBtn, { borderColor: c.border }]}
-        onPress={onComplete}
-        hitSlop={12}>
-        <Text style={[s.sqDoneBtnText, { color: c.textMuted }]}>Done</Text>
-      </TouchableOpacity>
+      <View style={s.sqRowActions}>
+        <TouchableOpacity
+          style={[s.sqEditBtn, { borderColor: c.border, backgroundColor: c.surface }]}
+          onPress={onEdit}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Edit task">
+          <Text style={[s.sqEditBtnIcon, { color: c.textMuted }]}>✎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.sqDoneBtn, doneBtnStyle]}
+          onPress={onComplete}
+          hitSlop={12}
+          activeOpacity={0.85}>
+          <Text style={[s.sqDoneBtnText, { color: doneLabelColor }]}>Done</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -656,6 +487,7 @@ function SessionQueueTaskRow({
 type SessionActionSheetProps = {
   task: SessionTask | null;
   onClose: () => void;
+  onEdit: () => void;
   onComplete: () => void;
   onDelete: () => void;
   c: AppTheme['colors'];
@@ -663,7 +495,7 @@ type SessionActionSheetProps = {
   insetBottom: number;
 };
 
-function SessionActionSheet({ task, onClose, onComplete, onDelete, c, s, insetBottom }: SessionActionSheetProps) {
+function SessionActionSheet({ task, onClose, onEdit, onComplete, onDelete, c, s, insetBottom }: SessionActionSheetProps) {
   if (!task) { return null; }
   function act(fn: () => void) { onClose(); setTimeout(fn, 120); }
   return (
@@ -673,6 +505,10 @@ function SessionActionSheet({ task, onClose, onComplete, onDelete, c, s, insetBo
         <View style={[s.sqActionSheet, { marginBottom: insetBottom + 100, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
           <Text style={[s.sqActionTitle, { color: c.textMuted }]} numberOfLines={2}>{task.title}</Text>
           <View style={[s.sqActionDivider, { backgroundColor: c.border }]} />
+          <TouchableOpacity style={s.sqActionRow} onPress={() => act(onEdit)}>
+            <Text style={[s.sqActionRowText, { color: c.text }]}>Edit task</Text>
+          </TouchableOpacity>
+          <View style={[s.sqActionDivider, { backgroundColor: c.borderInner }]} />
           <TouchableOpacity style={s.sqActionRow} onPress={() => act(onComplete)}>
             <Text style={[s.sqActionRowText, { color: c.success }]}>Mark as done</Text>
           </TouchableOpacity>
@@ -775,7 +611,7 @@ type Props = AppScreenProps<'Session'>;
 
 export default function SessionScreen({ route, navigation }: Props) {
   const thm = useTheme();
-  const { colors: c } = thm;
+  const { colors: c, radius: r } = thm;
   const s = useMemo(() => buildStyles(thm), [thm]);
 
   const { sessionId } = route.params;
@@ -801,6 +637,7 @@ export default function SessionScreen({ route, navigation }: Props) {
     reorderTasks,
     pinTask,
     unpinTask,
+    updateTaskFields,
     sendReaction,
     finalizeSession,
   } = useSession(sessionId);
@@ -808,6 +645,7 @@ export default function SessionScreen({ route, navigation }: Props) {
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [editingSessionTask, setEditingSessionTask] = useState<SessionTask | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionSheetTask, setActionSheetTask] = useState<SessionTask | null>(null);
   const insets = useSafeAreaInsets();
@@ -961,19 +799,29 @@ export default function SessionScreen({ route, navigation }: Props) {
   const hostMember = members.find(m => m.userId === session?.createdBy);
   const hostName = hostMember?.displayName ?? 'the host';
 
-  async function handleAddTask(title: string, estimatedMs: number | null) {
+  const sessionTaskLimitReached = (myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS;
+
+  async function handleCommitNewSessionTask(payload: TaskFormCommitPayload) {
     const newTask: SessionTask = {
       taskId: `${userId}-${Date.now()}`,
-      title,
+      title: payload.title,
       createdAt: Date.now(),
       completedAt: null,
-      estimatedMs,
+      estimatedMs: payload.estimatedMs,
       position: (myActiveTasks.length ?? 0) + 1, // service will overwrite this correctly
       isPinned: false,
       accumulatedSeconds: 0,
       timerStartedAt: null,
     };
     await addTask(newTask);
+  }
+
+  async function handleCommitEditSessionTask(payload: TaskFormCommitPayload) {
+    if (!editingSessionTask) { return; }
+    await updateTaskFields(editingSessionTask.taskId, {
+      title: payload.title,
+      estimatedMs: payload.estimatedMs,
+    });
   }
 
   async function handleLeave() {
@@ -1136,20 +984,26 @@ export default function SessionScreen({ route, navigation }: Props) {
                 keyExtractor={t => t.taskId}
                 renderItem={({ item, getIndex, drag, isActive: dragActive }: RenderItemParams<SessionTask>) => (
                   <ScaleDecorator>
-                    <SessionQueueTaskRow
-                      task={item}
-                      position={(getIndex() ?? 0) + 1}
-                      now={now}
-                      receivedReactions={reactions.filter(r => r.taskId === item.taskId && r.toUserId === userId)}
-                      onComplete={() => handleCompleteTask(item)}
+                    <SwipeableRow
+                      borderRadius={r.md}
                       onDelete={() => handleRemoveTask(item)}
-                      onLongPress={() => setActionSheetTask(item)}
-                      onTogglePin={() => handleTogglePin(item)}
-                      drag={drag}
-                      isActive={dragActive}
-                      c={c}
-                      s={s}
-                    />
+                      dragHandleReserveWidth={56}>
+                      <SessionQueueTaskRow
+                        task={item}
+                        position={(getIndex() ?? 0) + 1}
+                        now={now}
+                        receivedReactions={reactions.filter(r => r.taskId === item.taskId && r.toUserId === userId)}
+                        onComplete={() => handleCompleteTask(item)}
+                        onDelete={() => handleRemoveTask(item)}
+                        onEdit={() => setEditingSessionTask(item)}
+                        onLongPress={() => setActionSheetTask(item)}
+                        onTogglePin={() => handleTogglePin(item)}
+                        drag={drag}
+                        isActive={dragActive}
+                        c={c}
+                        s={s}
+                      />
+                    </SwipeableRow>
                   </ScaleDecorator>
                 )}
                 onDragEnd={({ data }) => handleReorder(data)}
@@ -1200,7 +1054,7 @@ export default function SessionScreen({ route, navigation }: Props) {
         {/* Pin hint */}
         {myActiveTasks.length > 1 && (
           <View style={s.focusHint}>
-            <Text style={[s.focusHintText, { color: c.textFaint }]}>
+            <Text style={[s.focusHintText, { color: c.text }]}>
               #1 is your focus. Tap a number badge to pin a task and run its timer in parallel.
             </Text>
           </View>
@@ -1214,7 +1068,7 @@ export default function SessionScreen({ route, navigation }: Props) {
             activeOpacity={0.7}>
             <Text style={[s.inviteCardLabel, { color: c.accent }]}>YOUR INVITE CODE</Text>
             <Text style={[s.inviteCardCode, { color: c.text }]}>{userProfile.personalInviteCode}</Text>
-            <Text style={[s.inviteCardHint, { color: c.textDim }]}>Tap to share · disappears when someone joins</Text>
+            <Text style={[s.inviteCardHint, { color: c.textSecondary }]}>Tap to share · disappears when someone joins</Text>
           </TouchableOpacity>
         )}
 
@@ -1254,13 +1108,45 @@ export default function SessionScreen({ route, navigation }: Props) {
       )}
 
       {/* Modals */}
-      <AddTaskModal
+      <TaskFormBottomSheet
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
-        onAdd={handleAddTask}
-        atLimit={(myMember?.tasks.length ?? 0) >= MAX_SESSION_TASKS}
-        c={c}
-        s={s}
+        mode="create"
+        syncKey={addModalVisible ? 'session-add' : undefined}
+        sheetTitle="What are you working on?"
+        titlePlaceholder="e.g. Fix the login bug"
+        estimatePrompt="How long will it take?"
+        submitLabel="Add to session"
+        timePresets={SESSION_TASK_ESTIMATE_PRESETS}
+        lockedBody={
+          sessionTaskLimitReached
+            ? `You can bring up to ${MAX_SESSION_TASKS} tasks into a session.`
+            : null
+        }
+        onCommit={handleCommitNewSessionTask}
+      />
+
+      <TaskFormBottomSheet
+        visible={editingSessionTask !== null}
+        onClose={() => setEditingSessionTask(null)}
+        mode="edit"
+        syncKey={editingSessionTask?.taskId}
+        sheetTitle="Edit task"
+        titlePlaceholder="Task title"
+        estimatePrompt="How long will it take?"
+        submitLabel="Save changes"
+        timePresets={SESSION_TASK_ESTIMATE_PRESETS}
+        initial={
+          editingSessionTask
+            ? {
+                title: editingSessionTask.title,
+                estimatedMs: editingSessionTask.estimatedMs,
+                reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+                togetherVisibility: SETTINGS_DEFAULTS.togetherVisibility,
+              }
+            : undefined
+        }
+        onCommit={handleCommitEditSessionTask}
       />
 
       {reactionTarget !== null && (
@@ -1279,6 +1165,11 @@ export default function SessionScreen({ route, navigation }: Props) {
       <SessionActionSheet
         task={actionSheetTask}
         onClose={() => setActionSheetTask(null)}
+        onEdit={() => {
+          const t = actionSheetTask;
+          setActionSheetTask(null);
+          if (t) { setEditingSessionTask(t); }
+        }}
         onComplete={() => actionSheetTask && handleCompleteTask(actionSheetTask)}
         onDelete={() => actionSheetTask && handleRemoveTask(actionSheetTask)}
         c={c}
@@ -1343,9 +1234,9 @@ function buildStyles(thm: AppTheme) {
 
     focusHint: {
       backgroundColor: c.accentSurface, borderRadius: r.sm, borderWidth: 1,
-      borderColor: c.accentSurfaceBorder, paddingVertical: sp.md, paddingHorizontal: 14,
+      borderColor: c.accent, paddingVertical: sp.md, paddingHorizontal: 14,
     },
-    focusHintText: { fontSize: 13, lineHeight: 18, opacity: 0.8 },
+    focusHintText: { fontSize: 13, lineHeight: 19, fontWeight: '500' },
     focusWrap: { gap: sp.sm },
     taskGap: { gap: sp.sm },
 
@@ -1388,10 +1279,26 @@ function buildStyles(thm: AppTheme) {
     sqTimer: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums' as const] },
     sqEstimate: { fontSize: 11, fontVariant: ['tabular-nums' as const] },
     sqMeta: { fontSize: 12 },
-    sqDoneBtn: {
-      borderRadius: 7, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 10, marginRight: 10,
+    sqRowActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginRight: 10,
+      flexShrink: 0,
     },
-    sqDoneBtnText: { fontSize: 12, fontWeight: '500' },
+    sqEditBtn: {
+      borderRadius: 7,
+      borderWidth: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    sqEditBtnIcon: { fontSize: 15, fontWeight: '500', lineHeight: 18 },
+    sqDoneBtn: {
+      borderRadius: 7, borderWidth: 1, paddingVertical: 6, paddingHorizontal: 11,
+    },
+    sqDoneBtnText: { fontSize: 12, fontWeight: '600' },
     sqCompletedRow: {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
       borderRadius: 8, borderWidth: 1, paddingVertical: 8, paddingHorizontal: 12, opacity: 0.6,
