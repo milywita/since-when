@@ -10,13 +10,16 @@ import {
   addTaskToSession as svcAddTask,
   removeTaskFromSession as svcRemoveTask,
   completeSessionTask as svcCompleteTask,
-  setActiveTask as svcSetActive,
+  reorderSessionTasks as svcReorderTasks,
+  pinSessionTask as svcPinTask,
+  unpinSessionTask as svcUnpinTask,
   sendReaction as svcSendReaction,
 } from '../services/sessionService';
 import { setActiveSession } from '../services/userService';
 import {
   markSoloTaskCompleteFromSession as svcCompleteSoloTask,
   addTaskFromSession as svcAddTaskFromSession,
+  updateSoloTaskAfterSession as svcUpdateSoloTask,
 } from '../services/taskService';
 import { saveSessionHistory } from '../services/historyService';
 import type { Session, SessionMember, SessionTask, Reaction, PartnerSummary, SessionHistoryRecord } from '../types/Session';
@@ -116,8 +119,19 @@ export function useSession(sessionId: string) {
     [sessionId, userId],
   );
 
-  const setActiveTask = useCallback(
-    (taskId: string | null) => svcSetActive(sessionId, userId, taskId),
+  const reorderTasks = useCallback(
+    (orderedActiveTasks: import('../types/Session').SessionTask[], previousFirstTaskId: string | null) =>
+      svcReorderTasks(sessionId, userId, orderedActiveTasks, previousFirstTaskId),
+    [sessionId, userId],
+  );
+
+  const pinTask = useCallback(
+    (taskId: string) => svcPinTask(sessionId, userId, taskId),
+    [sessionId, userId],
+  );
+
+  const unpinTask = useCallback(
+    (taskId: string) => svcUnpinTask(sessionId, userId, taskId),
     [sessionId, userId],
   );
 
@@ -134,12 +148,15 @@ export function useSession(sessionId: string) {
   /**
    * Copy session-only tasks (no sourceSoloTaskId) back to the user's Solo task
    * list, preserving completedAt so finished work appears in history.
-   * Tasks that were imported from Solo mode are already there — nothing to do.
+   * For tasks that came FROM solo mode, write their final accumulated focus time
+   * back to the original solo task so nothing is lost.
    */
   const syncMyTasksToSolo = useCallback(async () => {
     if (!myMember) { return; }
+    const now = Date.now();
+
+    // Session-only tasks (created inside together) → create new solo record.
     const sessionOnlyTasks = myMember.tasks.filter(t => !t.sourceSoloTaskId);
-    if (sessionOnlyTasks.length === 0) { return; }
     await Promise.all(
       sessionOnlyTasks.map(task =>
         svcAddTaskFromSession(userId, {
@@ -154,7 +171,24 @@ export function useSession(sessionId: string) {
         ),
       ),
     );
-  }, [myMember, userId]);
+
+    // Tasks imported from solo → update the original solo doc with accumulated time.
+    // (Completed ones are already handled by markSoloTaskCompleteFromSession.)
+    const importedActiveTasks = myMember.tasks.filter(
+      t => t.sourceSoloTaskId && t.completedAt === null,
+    );
+    await Promise.all(
+      importedActiveTasks.map(task => {
+        const liveSecs = task.timerStartedAt !== null
+          ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000))
+          : 0;
+        const finalSeconds = (task.accumulatedSeconds ?? 0) + liveSecs;
+        return svcUpdateSoloTask(userId, task.sourceSoloTaskId!, finalSeconds).catch(err =>
+          console.warn('[useSession] updateSoloTask failed for task:', task.title, err.message),
+        );
+      }),
+    );
+  }, [myMember, userId, sessionId]);
 
   /**
    * Full session exit routine: sync session-only tasks back to Solo and save
@@ -162,7 +196,9 @@ export function useSession(sessionId: string) {
    * Call this instead of syncMyTasksToSolo on both end and leave.
    */
   const finalizeSession = useCallback(async () => {
-    await syncMyTasksToSolo();
+    await syncMyTasksToSolo().catch(err =>
+      console.warn('[useSession] syncMyTasksToSolo failed:', err?.message),
+    );
     if (!myMember || !session) { return; }
     const partners: PartnerSummary[] = otherMembers.map(m => ({
       userId: m.userId,
@@ -201,7 +237,9 @@ export function useSession(sessionId: string) {
     addTask,
     removeTask,
     completeTask,
-    setActiveTask,
+    reorderTasks,
+    pinTask,
+    unpinTask,
     sendReaction,
     syncMyTasksToSolo,
     finalizeSession,

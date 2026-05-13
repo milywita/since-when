@@ -21,10 +21,13 @@ export function PartnerCard({
   onReact,
 }: PartnerCardProps) {
   const { colors: c, spacing: sp, radius: r } = useTheme();
+  // #1 active task is the focused task (activeTaskId is kept in sync with position 1).
   const activeTask = member.tasks.find(
     t => t.taskId === member.activeTaskId && !t.completedAt,
   );
-  const otherTasks = member.tasks.filter(t => t.taskId !== member.activeTaskId);
+  const otherTasks = member.tasks
+    .filter(t => t.taskId !== member.activeTaskId)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
 
   return (
     <View
@@ -49,70 +52,71 @@ export function PartnerCard({
         <Text style={[styles.partnerEmpty, { color: c.textFaint }]}>No tasks added yet.</Text>
       )}
 
-      {activeTask && (
-        <View
-          style={[
-            styles.partnerFocusTask,
-            {
-              backgroundColor: c.accentSurface,
-              borderRadius: r.sm,
-              borderColor: c.accentSurfaceBorder,
-              padding: sp.md,
-              gap: sp.xs,
-            },
-          ]}>
-          <View style={styles.partnerFocusHeader}>
-            <PulsingDot />
-            <Text style={[styles.partnerFocusLabel, { color: c.accent }]}>FOCUS</Text>
-          </View>
-          <Text style={[styles.partnerFocusTitle, { color: c.text }]} numberOfLines={2}>
-            {activeTask.title}
-          </Text>
-          <View style={styles.partnerFocusMeta}>
-            <Text
-              style={[
-                styles.partnerFocusTimer,
-                { color: now - activeTask.createdAt > 86400 * 1000 ? c.dangerMuted : c.accentLight },
-              ]}>
-              {formatElapsed(now - activeTask.createdAt)}
+      {activeTask && (() => {
+        const activeLiveSecs = activeTask.timerStartedAt !== null
+          ? Math.max(0, Math.floor((now - activeTask.timerStartedAt) / 1000))
+          : 0;
+        const activeFocusMs = ((activeTask.accumulatedSeconds ?? 0) + activeLiveSecs) * 1000;
+        const activeOver = activeTask.estimatedMs != null && activeFocusMs > activeTask.estimatedMs;
+        return (
+          <View
+            style={[
+              styles.partnerFocusTask,
+              {
+                backgroundColor: c.accentSurface,
+                borderRadius: r.sm,
+                borderColor: c.accentSurfaceBorder,
+                padding: sp.md,
+                gap: sp.xs,
+              },
+            ]}>
+            <View style={styles.partnerFocusHeader}>
+              <PulsingDot />
+              <Text style={[styles.partnerFocusLabel, { color: c.accent }]}>FOCUS</Text>
+            </View>
+            <Text style={[styles.partnerFocusTitle, { color: c.text }]} numberOfLines={2}>
+              {activeTask.title}
             </Text>
-            {activeTask.estimatedMs != null && (
+            <View style={styles.partnerFocusMeta}>
               <Text
                 style={[
-                  styles.partnerEstimate,
-                  {
-                    color:
-                      now - activeTask.createdAt > activeTask.estimatedMs
-                        ? c.danger
-                        : c.textMuted,
-                  },
+                  styles.partnerFocusTimer,
+                  { color: activeFocusMs > 86400 * 1000 ? c.dangerMuted : c.accentLight },
                 ]}>
-                {now - activeTask.createdAt > activeTask.estimatedMs
-                  ? `over by ${formatElapsed((now - activeTask.createdAt) - activeTask.estimatedMs)}`
-                  : `est. ${formatElapsed(activeTask.estimatedMs)}`}
+                {formatElapsed(activeFocusMs)}
               </Text>
-            )}
-            <ReactionButton
-              variant="focus"
-              onPress={() => onReact(activeTask.taskId, false)}
+              {activeTask.estimatedMs != null && (
+                <Text style={[styles.partnerEstimate, { color: activeOver ? c.danger : c.textMuted }]}>
+                  {activeOver
+                    ? `over by ${formatElapsed(activeFocusMs - activeTask.estimatedMs)}`
+                    : `est. ${formatElapsed(activeTask.estimatedMs)}`}
+                </Text>
+              )}
+              <ReactionButton
+                variant="focus"
+                onPress={() => onReact(activeTask.taskId, false)}
+              />
+            </View>
+            <TaskReactions
+              reactions={recentReactions.filter(rx => rx.taskId === activeTask.taskId)}
+              now={now}
             />
           </View>
-          <TaskReactions
-            reactions={recentReactions.filter(rx => rx.taskId === activeTask.taskId)}
-            now={now}
-          />
-        </View>
-      )}
+        );
+      })()}
 
       {otherTasks.map(task => {
-        const elapsed = now - task.createdAt;
+        const liveSecs = task.timerStartedAt !== null
+          ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000))
+          : 0;
+        const focusMs = ((task.accumulatedSeconds ?? 0) + liveSecs) * 1000;
         const isDone = task.completedAt !== null;
         const taskReactions = recentReactions.filter(rx => rx.taskId === task.taskId);
         return (
           <PartnerTaskRow
             key={task.taskId}
             task={task}
-            elapsed={elapsed}
+            elapsed={focusMs}
             isDone={isDone}
             taskReactions={taskReactions}
             now={now}
@@ -184,7 +188,9 @@ function PartnerTaskRow({
         )}
         {isDone && (
           <Text style={[styles.partnerTaskDoneLabel, { color: c.success }]}>
-            Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
+            Done in {formatElapsed((task.accumulatedSeconds ?? 0) > 0
+              ? (task.accumulatedSeconds ?? 0) * 1000
+              : (task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
         <TaskReactions reactions={taskReactions} now={now} />

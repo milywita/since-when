@@ -32,6 +32,7 @@ import {
   subscribeToJoinRequest,
 } from '../services/sessionService';
 import { subscribeToUserProfile } from '../services/userService';
+import { pauseTaskTimers } from '../services/taskService';
 import { useTasks } from '../hooks/useTasks';
 import { SESSION_DURATION_PRESETS } from '../types/Session';
 import type { SessionTask, JoinRequest } from '../types/Session';
@@ -111,7 +112,10 @@ function TaskSelection({
             showsVerticalScrollIndicator={false}
             renderItem={({ item }) => {
               const checked = selectedIds.has(item.id);
-              const elapsed = now - item.createdAt;
+              const liveSecs = item.timerStartedAt !== null
+                ? Math.max(0, Math.floor((now - item.timerStartedAt) / 1000))
+                : 0;
+              const elapsed = ((item.accumulatedSeconds ?? 0) + liveSecs) * 1000;
               const atLimit = selectedIds.size >= 6 && !checked;
               return (
                 <TouchableOpacity
@@ -283,18 +287,29 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   }
 
   function buildSessionTasks(): SessionTask[] {
+    const now = Date.now();
     return activeTasks
       .filter(t => selectedTaskIds.has(t.id))
-      .map(t => ({
-        taskId: t.id,
-        sourceSoloTaskId: t.id,
-        title: t.title,
-        createdAt: t.createdAt,
-        completedAt: null,
-        estimatedMs: t.estimatedMs ?? null,
-        accumulatedSeconds: 0,
-        timerStartedAt: null,
-      }));
+      .map((t, i) => {
+        // Snapshot any live solo timer so accumulated time carries over faithfully.
+        const liveSecs = t.timerStartedAt !== null
+          ? Math.max(0, Math.floor((now - t.timerStartedAt) / 1000))
+          : 0;
+        const snapshotSeconds = (t.accumulatedSeconds ?? 0) + liveSecs;
+        return {
+          taskId: t.id,
+          sourceSoloTaskId: t.id,
+          title: t.title,
+          createdAt: t.createdAt,
+          completedAt: null,
+          estimatedMs: t.estimatedMs ?? null,
+          position: i + 1,
+          isPinned: false,
+          accumulatedSeconds: snapshotSeconds,
+          // #1 continues running immediately; others wait.
+          timerStartedAt: i === 0 ? now : null,
+        };
+      });
   }
 
   async function handleHost() {
@@ -369,6 +384,15 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     const tasks = buildSessionTasks();
     setConfirming(true);
     try {
+      // Pause timers on the original solo tasks so they don't double-count
+      // focus time while the user is in a Together session.
+      const soloIds = tasks
+        .map(t => t.sourceSoloTaskId)
+        .filter((id): id is string => Boolean(id));
+      if (soloIds.length > 0) {
+        await pauseTaskTimers(user.uid, soloIds);
+      }
+
       if (pending.kind === 'create') {
         for (const task of tasks) {
           await addTaskToSession(pending.sessionId, user.uid, task);

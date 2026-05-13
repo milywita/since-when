@@ -276,3 +276,52 @@ export async function markSoloTaskCompleteFromSession(
     timerStartedAt: null,
   });
 }
+
+/**
+ * Pause the timers of a set of solo tasks that are being moved into a Together
+ * session. Snapshots any live elapsed time so it is not double-counted later.
+ * Call this right before adding the tasks to the session.
+ */
+export async function pauseTaskTimers(
+  userId: string,
+  taskIds: string[],
+): Promise<void> {
+  if (taskIds.length === 0) { return; }
+  const col = tasksCollection(userId);
+  const now = Date.now();
+  const batch = firestore().batch();
+  const docs = await Promise.all(taskIds.map(id => col.doc(id).get()));
+  for (const doc of docs) {
+    if (!doc.exists) { continue; }
+    const task = doc.data() as Task;
+    if (task.timerStartedAt === null) { continue; }
+    const extra = Math.floor((now - task.timerStartedAt) / 1000);
+    batch.update(col.doc(task.id), {
+      accumulatedSeconds: (task.accumulatedSeconds ?? 0) + extra,
+      timerStartedAt: null,
+    });
+  }
+  await batch.commit();
+}
+
+/**
+ * Update a solo task's accumulated focus time after a Together session ends.
+ * Also restarts the timer if this task is currently at position #1 (so #1
+ * auto-focuses again once the user returns to the solo queue).
+ */
+export async function updateSoloTaskAfterSession(
+  userId: string,
+  taskId: string,
+  accumulatedSeconds: number,
+): Promise<void> {
+  const col = tasksCollection(userId);
+  const doc = await col.doc(taskId).get();
+  if (!doc.exists) { return; }
+  const task = doc.data() as Task;
+  if (task.completedAt !== null) { return; } // already completed — don't touch
+  await col.doc(taskId).update({
+    accumulatedSeconds,
+    // Restart the timer if it's position #1 so it keeps ticking once the user is back.
+    timerStartedAt: task.position === 1 ? Date.now() : null,
+  });
+}

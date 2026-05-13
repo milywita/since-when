@@ -6,11 +6,18 @@ export type SessionTask = {
   createdAt: number;
   completedAt: number | null;
   estimatedMs: number | null;
-  /** Seconds accumulated while this task was the active/focused task in the session. */
+  /** 1-based queue position among active tasks. Completed tasks keep their last position. */
+  position: number;
+  /**
+   * True when the user has pinned this task as co-active.
+   * Only non-#1 tasks can be pinned. Timer runs in parallel with #1.
+   */
+  isPinned: boolean;
+  /** Seconds accumulated while this task was in focus (position #1 or pinned). */
   accumulatedSeconds: number;
   /**
-   * Unix ms timestamp of when the current active focus session started.
-   * Non-null while this task is the activeTaskId. Live elapsed = accumulatedSeconds + (now - timerStartedAt) / 1000.
+   * Unix ms timestamp of when the current active timer session started.
+   * Non-null while this task is #1 or pinned. Live elapsed = accumulatedSeconds + (now - timerStartedAt) / 1000.
    */
   timerStartedAt: number | null;
 };

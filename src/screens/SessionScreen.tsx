@@ -14,15 +14,14 @@ import {
   ScrollView,
   Share,
 } from 'react-native';
+import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from 'react-native-draggable-flatlist';
 import auth from '@react-native-firebase/auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../components/ui/Screen';
 import { PartnerCard } from '../components/session/PartnerCard';
-import { SessionTimerCard } from '../components/session/SessionTimerCard';
 import { useTheme } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
 import { useSession } from '../hooks/useSession';
-import { SwipeableRow } from '../components/SwipeableRow';
 import { subscribeToUserProfile } from '../services/userService';
 import {
   subscribeToJoinRequests,
@@ -62,6 +61,15 @@ function formatCountdown(ms: number): string {
   const mins = Math.floor(totalSec / 60);
   const secs = totalSec % 60;
   return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function formatSeconds(totalSec: number): string {
+  if (totalSec < 60) { return `${totalSec}s`; }
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) { return `${h}h ${m}m`; }
+  return `${m}m ${String(s).padStart(2, '0')}s`;
 }
 
 function useNow(intervalMs = 1000) {
@@ -530,89 +538,155 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
   );
 }
 
-// ─── My task row ──────────────────────────────────────────────────────────────
+// ─── Session queue task row ───────────────────────────────────────────────────
 
-type MyTaskRowProps = {
+type SessionQueueTaskRowProps = {
   task: SessionTask;
+  position: number;
   now: number;
-  isActive: boolean;
   receivedReactions: Reaction[];
   onComplete: () => void;
-  onSetActive: () => void;
-  onClearActive: () => void;
+  onDelete: () => void;
+  onLongPress: () => void;
+  onTogglePin: () => void;
+  drag: () => void;
+  isActive: boolean; // dragging active, not focus-active
   c: AppTheme['colors'];
   s: S;
 };
 
-function MyTaskRow({ task, now, isActive, receivedReactions, onComplete, onSetActive, onClearActive, c, s }: MyTaskRowProps) {
-  // Live focused time: accumulated seconds + any ongoing session since timerStartedAt.
-  const liveSecs = task.timerStartedAt !== null
-    ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000))
-    : 0;
-  const focusSecs = (task.accumulatedSeconds ?? 0) + liveSecs;
-  const elapsed = focusSecs * 1000;
-  const isOld = elapsed > 86400 * 1000;
-  const isDone = task.completedAt !== null;
-  const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
+function SessionQueueTaskRow({
+  task, position, now, receivedReactions,
+  onComplete, onDelete, onLongPress, onTogglePin,
+  drag, isActive, c, s,
+}: SessionQueueTaskRowProps) {
+  const isFirst = position === 1;
+  const isTimerRunning = isFirst || (task.isPinned ?? false);
 
-  if (isActive && !isDone) {
-    return (
-      <View style={s.focusWrap}>
-        <SessionTimerCard
-          task={task}
-          now={now}
-          onComplete={onComplete}
-          onClearFocus={onClearActive}
-        />
-        <TaskReactions reactions={receivedReactions} now={now} />
-      </View>
-    );
-  }
+  const liveSeconds = isTimerRunning
+    ? (task.accumulatedSeconds ?? 0) +
+      (task.timerStartedAt !== null ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000)) : 0)
+    : (task.accumulatedSeconds ?? 0);
+
+  const hasFocusTime = liveSeconds > 0;
+  const estimatedSec = task.estimatedMs !== null ? task.estimatedMs / 1000 : null;
+  const isOverEstimate = estimatedSec !== null && liveSeconds > estimatedSec;
 
   return (
-    <View style={[s.myTaskRow, isDone && s.myTaskRowDone]}>
-      <TouchableOpacity
-        style={s.activeDot}
-        onPress={isDone ? undefined : onSetActive}
-        hitSlop={8}>
-        <View style={[s.activeDotInner, { backgroundColor: c.border }]} />
+    <View
+      style={[
+        s.sqRow,
+        {
+          backgroundColor: isActive ? c.surfaceRaised : c.surface,
+          borderColor: isFirst ? c.accent : (task.isPinned ?? false) ? c.accentLight : c.border,
+          borderWidth: isFirst || (task.isPinned ?? false) ? 1.5 : 1,
+          opacity: isActive ? 0.95 : 1,
+        },
+      ]}>
+      {/* drag handle */}
+      <TouchableOpacity onPressIn={drag} style={s.sqDragHandle} hitSlop={8}>
+        <Text style={[s.sqDragHandleText, { color: c.textDim }]}>⠿</Text>
       </TouchableOpacity>
-      <View style={s.myTaskInfo}>
-        <Text
-          style={[
-            s.myTaskTitle,
-            { color: isDone ? c.textSoft : c.text, textDecorationLine: isDone ? 'line-through' : 'none' },
-          ]}
-          numberOfLines={2}>
-          {task.title}
+
+      {/* position badge — tap to toggle pin */}
+      <TouchableOpacity
+        style={[
+          s.sqBadge,
+          { backgroundColor: isFirst ? c.accent : (task.isPinned ?? false) ? c.accentSurface : c.surfaceSoft },
+        ]}
+        onPress={isFirst ? undefined : onTogglePin}
+        activeOpacity={isFirst ? 1 : 0.6}
+        hitSlop={6}>
+        <Text style={[s.sqBadgeText, { color: isFirst ? c.onAccent : (task.isPinned ?? false) ? c.accentLight : c.textMuted }]}>
+          {position}
         </Text>
-        {!isDone && (
-          <View style={s.myTaskMeta}>
-            <Text style={[s.myTaskTimer, { color: (isOld || overEstimate) ? c.danger : c.textMuted }]}>
-              {formatElapsed(elapsed)}
+      </TouchableOpacity>
+
+      {/* content */}
+      <TouchableOpacity style={s.sqContent} onLongPress={onLongPress} activeOpacity={1}>
+        <Text style={[s.sqTitle, { color: c.text }]} numberOfLines={2}>{task.title}</Text>
+
+        {isTimerRunning ? (
+          <View style={s.sqTimerRow}>
+            <Text style={[s.sqTimer, { color: isOverEstimate ? c.danger : isFirst ? c.accent : c.accentLight }]}>
+              {formatSeconds(liveSeconds)}
             </Text>
-            {task.estimatedMs != null && (
-              <Text style={[s.myTaskEstimate, { color: overEstimate ? c.dangerMuted : c.textSoft }]}>
-                {overEstimate
-                  ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
-                  : `est. ${formatElapsed(task.estimatedMs)}`}
+            {estimatedSec !== null && (
+              <Text style={[s.sqEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
+                {isOverEstimate
+                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                  : `est. ${formatSeconds(estimatedSec)}`}
               </Text>
             )}
           </View>
+        ) : hasFocusTime ? (
+          <View style={s.sqTimerRow}>
+            <Text style={[s.sqTimer, { color: c.textMuted }]}>{formatSeconds(liveSeconds)}</Text>
+            {estimatedSec !== null && (
+              <Text style={[s.sqEstimate, { color: c.textSoft }]}>est. {formatSeconds(estimatedSec)}</Text>
+            )}
+          </View>
+        ) : (
+          <View style={s.sqTimerRow}>
+            <Text style={[s.sqMeta, { color: c.textMuted }]}>Added just now</Text>
+            {estimatedSec !== null && (
+              <Text style={[s.sqEstimate, { color: c.textSoft }]}>est. {formatSeconds(estimatedSec)}</Text>
+            )}
+          </View>
         )}
-        {isDone && (
-          <Text style={[s.myTaskDoneLabel, { color: c.success }]}>
-            Done in {formatElapsed((task.accumulatedSeconds ?? 0) > 0 ? (task.accumulatedSeconds ?? 0) * 1000 : (task.completedAt ?? 0) - task.createdAt)}
-          </Text>
+
+        {receivedReactions.length > 0 && (
+          <TaskReactions reactions={receivedReactions} now={now} />
         )}
-        <TaskReactions reactions={receivedReactions} now={now} />
-      </View>
-      {!isDone && (
-        <TouchableOpacity style={s.myDoneBtn} onPress={onComplete} hitSlop={8}>
-          <Text style={[s.myDoneBtnText, { color: c.text }]}>Done</Text>
-        </TouchableOpacity>
-      )}
+      </TouchableOpacity>
+
+      {/* done button */}
+      <TouchableOpacity
+        style={[s.sqDoneBtn, { borderColor: c.border }]}
+        onPress={onComplete}
+        hitSlop={12}>
+        <Text style={[s.sqDoneBtnText, { color: c.textMuted }]}>Done</Text>
+      </TouchableOpacity>
     </View>
+  );
+}
+
+// ─── Session task action sheet ────────────────────────────────────────────────
+
+type SessionActionSheetProps = {
+  task: SessionTask | null;
+  onClose: () => void;
+  onComplete: () => void;
+  onDelete: () => void;
+  c: AppTheme['colors'];
+  s: S;
+  insetBottom: number;
+};
+
+function SessionActionSheet({ task, onClose, onComplete, onDelete, c, s, insetBottom }: SessionActionSheetProps) {
+  if (!task) { return null; }
+  function act(fn: () => void) { onClose(); setTimeout(fn, 120); }
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.sqPopupHost}>
+        <TouchableOpacity style={s.sqPopupBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sqActionSheet, { marginBottom: insetBottom + 100, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+          <Text style={[s.sqActionTitle, { color: c.textMuted }]} numberOfLines={2}>{task.title}</Text>
+          <View style={[s.sqActionDivider, { backgroundColor: c.border }]} />
+          <TouchableOpacity style={s.sqActionRow} onPress={() => act(onComplete)}>
+            <Text style={[s.sqActionRowText, { color: c.success }]}>Mark as done</Text>
+          </TouchableOpacity>
+          <View style={[s.sqActionDivider, { backgroundColor: c.borderInner }]} />
+          <TouchableOpacity style={s.sqActionRow} onPress={() => act(onDelete)}>
+            <Text style={[s.sqActionRowText, { color: c.danger }]}>Delete task</Text>
+          </TouchableOpacity>
+          <View style={[s.sqActionDivider, { backgroundColor: c.border }]} />
+          <TouchableOpacity style={s.sqActionRow} onPress={onClose}>
+            <Text style={[s.sqActionRowText, { color: c.textMuted }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -724,7 +798,9 @@ export default function SessionScreen({ route, navigation }: Props) {
     addTask,
     removeTask,
     completeTask,
-    setActiveTask,
+    reorderTasks,
+    pinTask,
+    unpinTask,
     sendReaction,
     finalizeSession,
   } = useSession(sessionId);
@@ -733,6 +809,8 @@ export default function SessionScreen({ route, navigation }: Props) {
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [actionSheetTask, setActionSheetTask] = useState<SessionTask | null>(null);
+  const insets = useSafeAreaInsets();
   const [reactionTarget, setReactionTarget] = useState<{
     toUserId: string;
     taskId: string;
@@ -824,7 +902,8 @@ export default function SessionScreen({ route, navigation }: Props) {
     prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
   }, [reactions, loading, userId, members, myMember, flash]);
 
-  const myActiveTasks = myMember?.tasks.filter(t => t.completedAt === null) ?? [];
+  const myActiveTasks = (myMember?.tasks.filter(t => t.completedAt === null) ?? [])
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
   const myCompletedTasks = myMember?.tasks.filter(t => t.completedAt !== null) ?? [];
 
   const timeLeft = session?.endsAt ? Math.max(0, session.endsAt - now) : null;
@@ -889,6 +968,8 @@ export default function SessionScreen({ route, navigation }: Props) {
       createdAt: Date.now(),
       completedAt: null,
       estimatedMs,
+      position: (myActiveTasks.length ?? 0) + 1, // service will overwrite this correctly
+      isPinned: false,
       accumulatedSeconds: 0,
       timerStartedAt: null,
     };
@@ -903,16 +984,26 @@ export default function SessionScreen({ route, navigation }: Props) {
 
   async function handleCompleteTask(task: SessionTask) {
     await completeTask(task);
-    flash(`You did it. "${task.title}" — gone.`);
+    const focusSecs = task.accumulatedSeconds ?? 0;
+    const focusMs = focusSecs > 0 ? focusSecs * 1000 : null;
+    flash(`Done! "${task.title}"${focusMs ? ` in ${formatElapsed(focusMs)}` : ''}`);
   }
 
   async function handleRemoveTask(task: SessionTask) {
     await removeTask(task.taskId);
   }
 
-  function handleSetActive(taskId: string) {
-    const current = myMember?.activeTaskId;
-    setActiveTask(current === taskId ? null : taskId).catch(console.error);
+  async function handleReorder(orderedActive: SessionTask[]) {
+    const previousFirstId = myActiveTasks[0]?.taskId ?? null;
+    await reorderTasks(orderedActive, previousFirstId);
+  }
+
+  async function handleTogglePin(task: SessionTask) {
+    if (task.isPinned ?? false) {
+      await unpinTask(task.taskId);
+    } else {
+      await pinTask(task.taskId);
+    }
   }
 
   async function handleSendReaction(text: string) {
@@ -985,7 +1076,12 @@ export default function SessionScreen({ route, navigation }: Props) {
               onPress={() =>
                 Alert.alert('End session?', 'This will end the session for everyone.', [
                   { text: 'Cancel', style: 'cancel' },
-                  { text: 'End', style: 'destructive', onPress: () => endSession() },
+                  {
+                    text: 'End', style: 'destructive', onPress: () =>
+                      endSession().catch((err: any) =>
+                        Alert.alert('Error', err?.message ?? 'Could not end session.'),
+                      ),
+                  },
                 ])
               }>
               <Text style={[s.endBtnText, { color: c.textSoft }]}>End</Text>
@@ -1033,26 +1129,34 @@ export default function SessionScreen({ route, navigation }: Props) {
             <Text style={[s.emptyMy, { color: c.textFaint }]}>Add tasks you're working on this session.</Text>
           )}
 
-          <View style={s.taskGap}>
-            {myActiveTasks.map(task => (
-              <SwipeableRow
-                key={task.taskId}
-                onDelete={() => handleRemoveTask(task)}
-                borderRadius={10}>
-                <MyTaskRow
-                  task={task}
-                  now={now}
-                  isActive={(myMember?.activeTaskId ?? null) === task.taskId}
-                  receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
-                  onComplete={() => handleCompleteTask(task)}
-                  onSetActive={() => handleSetActive(task.taskId)}
-                  onClearActive={() => setActiveTask(null)}
-                  c={c}
-                  s={s}
-                />
-              </SwipeableRow>
-            ))}
-          </View>
+          {myActiveTasks.length > 0 && (
+            <View style={{ minHeight: myActiveTasks.length * 72 }}>
+              <DraggableFlatList
+                data={myActiveTasks}
+                keyExtractor={t => t.taskId}
+                renderItem={({ item, getIndex, drag, isActive: dragActive }: RenderItemParams<SessionTask>) => (
+                  <ScaleDecorator>
+                    <SessionQueueTaskRow
+                      task={item}
+                      position={(getIndex() ?? 0) + 1}
+                      now={now}
+                      receivedReactions={reactions.filter(r => r.taskId === item.taskId && r.toUserId === userId)}
+                      onComplete={() => handleCompleteTask(item)}
+                      onDelete={() => handleRemoveTask(item)}
+                      onLongPress={() => setActionSheetTask(item)}
+                      onTogglePin={() => handleTogglePin(item)}
+                      drag={drag}
+                      isActive={dragActive}
+                      c={c}
+                      s={s}
+                    />
+                  </ScaleDecorator>
+                )}
+                onDragEnd={({ data }) => handleReorder(data)}
+                scrollEnabled={false}
+              />
+            </View>
+          )}
 
           <TouchableOpacity
             style={s.addTaskBtn}
@@ -1076,31 +1180,28 @@ export default function SessionScreen({ route, navigation }: Props) {
 
               {completedExpanded && (
                 <View style={s.taskGap}>
-                  {myCompletedTasks.map(task => (
-                    <MyTaskRow
-                      key={task.taskId}
-                      task={task}
-                      now={now}
-                      isActive={false}
-                      receivedReactions={reactions.filter(r => r.taskId === task.taskId && r.toUserId === userId)}
-                      onComplete={() => {}}
-                      onSetActive={() => {}}
-                      onClearActive={() => {}}
-                      c={c}
-                      s={s}
-                    />
-                  ))}
+                  {myCompletedTasks.map(task => {
+                    const focusSecs = task.accumulatedSeconds ?? 0;
+                    return (
+                      <View key={task.taskId} style={[s.sqCompletedRow, { backgroundColor: c.surface, borderColor: c.border }]}>
+                        <Text style={[s.sqCompletedTitle, { color: c.textSoft }]} numberOfLines={1}>{task.title}</Text>
+                        <Text style={[s.sqCompletedTime, { color: c.success }]}>
+                          {focusSecs > 0 ? `Done in ${formatSeconds(focusSecs)}` : 'Done'}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
             </>
           )}
         </View>
 
-        {/* Active task hint */}
-        {myActiveTasks.length > 0 && myMember?.activeTaskId === null && (
+        {/* Pin hint */}
+        {myActiveTasks.length > 1 && (
           <View style={s.focusHint}>
-            <Text style={[s.focusHintText, { color: c.accent }]}>
-              Tap the dot next to a task to set your focus. Your partner can see what you're working on. Swipe left to remove tasks.
+            <Text style={[s.focusHintText, { color: c.textFaint }]}>
+              #1 is your focus. Tap a number badge to pin a task and run its timer in parallel.
             </Text>
           </View>
         )}
@@ -1174,6 +1275,16 @@ export default function SessionScreen({ route, navigation }: Props) {
           s={s}
         />
       )}
+
+      <SessionActionSheet
+        task={actionSheetTask}
+        onClose={() => setActionSheetTask(null)}
+        onComplete={() => actionSheetTask && handleCompleteTask(actionSheetTask)}
+        onDelete={() => actionSheetTask && handleRemoveTask(actionSheetTask)}
+        c={c}
+        s={s}
+        insetBottom={insets.bottom}
+      />
     </Screen>
   );
 }
@@ -1257,6 +1368,53 @@ function buildStyles(thm: AppTheme) {
     myTaskDoneLabel: { fontSize: 12 },
     myDoneBtn: { borderRadius: 7, borderWidth: 1, borderColor: c.border, paddingVertical: 6, paddingHorizontal: sp.md },
     myDoneBtnText: { fontSize: 12, fontWeight: '500' },
+
+    // ── Session queue rows ──────────────────────────────────────────────────
+    sqRow: {
+      flexDirection: 'row', alignItems: 'center',
+      borderRadius: 12, borderWidth: 1,
+      marginBottom: 8, overflow: 'hidden',
+    },
+    sqDragHandle: { paddingHorizontal: 10, paddingVertical: 14, justifyContent: 'center', alignItems: 'center' },
+    sqDragHandleText: { fontSize: 18 },
+    sqBadge: {
+      width: 28, height: 28, borderRadius: 14, justifyContent: 'center', alignItems: 'center',
+      marginLeft: 2, marginRight: 6, flexShrink: 0,
+    },
+    sqBadgeText: { fontSize: 13, fontWeight: '700' },
+    sqContent: { flex: 1, paddingVertical: 12, paddingRight: 6, gap: 3 },
+    sqTitle: { fontSize: 15, fontWeight: '500', lineHeight: 20 },
+    sqTimerRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' },
+    sqTimer: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums' as const] },
+    sqEstimate: { fontSize: 11, fontVariant: ['tabular-nums' as const] },
+    sqMeta: { fontSize: 12 },
+    sqDoneBtn: {
+      borderRadius: 7, borderWidth: 1, paddingVertical: 5, paddingHorizontal: 10, marginRight: 10,
+    },
+    sqDoneBtnText: { fontSize: 12, fontWeight: '500' },
+    sqCompletedRow: {
+      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+      borderRadius: 8, borderWidth: 1, paddingVertical: 8, paddingHorizontal: 12, opacity: 0.6,
+    },
+    sqCompletedTitle: { flex: 1, fontSize: 13, textDecorationLine: 'line-through' as const },
+    sqCompletedTime: { fontSize: 12, fontWeight: '500' },
+
+    // ── Session action sheet ────────────────────────────────────────────────
+    sqPopupHost: { flex: 1, justifyContent: 'flex-end' },
+    sqPopupBackdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+    sqActionSheet: {
+      marginHorizontal: sp.lg, borderRadius: 20, borderWidth: 1,
+      overflow: 'hidden' as const,
+      shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.18, shadowRadius: 24, elevation: 12,
+    },
+    sqActionTitle: {
+      fontSize: 13, fontWeight: '600', letterSpacing: 0.2, textAlign: 'center' as const,
+      paddingVertical: 14, paddingHorizontal: sp.xl,
+    },
+    sqActionDivider: { height: StyleSheet.hairlineWidth },
+    sqActionRow: { paddingVertical: 17, paddingHorizontal: sp.xl, alignItems: 'center' as const },
+    sqActionRowText: { fontSize: 17, fontWeight: '400' },
 
     addTaskBtn: {
       borderRadius: r.sm, borderWidth: 1, borderColor: c.border,

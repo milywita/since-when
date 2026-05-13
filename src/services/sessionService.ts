@@ -165,6 +165,22 @@ export async function endSession(sessionId: string, hostUserId: string): Promise
 
 // ─── Member task management ───────────────────────────────────────────────────
 
+/** Resequence a list of active tasks to 1-based positions. */
+function resequenced(tasks: SessionTask[]): SessionTask[] {
+  return tasks.map((t, i) => ({ ...t, position: i + 1 }));
+}
+
+/** Pause a task's timer, snapshotting elapsed time. */
+function pauseTimer(t: SessionTask, now: number): SessionTask {
+  const extra = t.timerStartedAt !== null ? Math.floor((now - t.timerStartedAt) / 1000) : 0;
+  return { ...t, accumulatedSeconds: (t.accumulatedSeconds ?? 0) + extra, timerStartedAt: null };
+}
+
+/** Start a task's timer if not already running. */
+function startTimer(t: SessionTask, now: number): SessionTask {
+  return { ...t, timerStartedAt: t.timerStartedAt ?? now };
+}
+
 export async function addTaskToSession(
   sessionId: string,
   userId: string,
@@ -174,12 +190,19 @@ export async function addTaskToSession(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  const taskWithTimer: SessionTask = {
+  const now = Date.now();
+  const activeCount = member.tasks.filter(t => t.completedAt === null).length;
+  const isFirst = activeCount === 0;
+  const newTask: SessionTask = {
     ...task,
+    position: activeCount + 1,
+    isPinned: false,
     accumulatedSeconds: task.accumulatedSeconds ?? 0,
-    timerStartedAt: task.timerStartedAt ?? null,
+    timerStartedAt: isFirst ? now : null,
   };
-  await memberRef.update({ tasks: [...member.tasks, taskWithTimer] });
+  const updates: Partial<SessionMember> = { tasks: [...member.tasks, newTask] };
+  if (isFirst) { updates.activeTaskId = newTask.taskId; }
+  await memberRef.update(updates);
 }
 
 export async function removeTaskFromSession(
@@ -191,10 +214,25 @@ export async function removeTaskFromSession(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  const tasks = member.tasks.filter(t => t.taskId !== taskId);
-  const updates: Partial<SessionMember> = { tasks };
-  if (member.activeTaskId === taskId) { updates.activeTaskId = null; }
-  await memberRef.update(updates);
+  const now = Date.now();
+
+  const removing = member.tasks.find(t => t.taskId === taskId);
+  const wasFirst = removing?.position === 1 && removing?.completedAt === null;
+  const remaining = member.tasks.filter(t => t.taskId !== taskId);
+  const remainingActive = remaining.filter(t => t.completedAt === null);
+  const completedTasks = remaining.filter(t => t.completedAt !== null);
+
+  let updatedActive = resequenced(remainingActive);
+  // If the removed task was #1, start the new #1's timer.
+  if (wasFirst && updatedActive.length > 0) {
+    updatedActive[0] = startTimer(updatedActive[0], now);
+  }
+
+  const newFirstId = updatedActive[0]?.taskId ?? null;
+  await memberRef.update({
+    tasks: [...updatedActive, ...completedTasks],
+    activeTaskId: newFirstId,
+  });
 }
 
 export async function completeSessionTask(
@@ -207,52 +245,110 @@ export async function completeSessionTask(
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
   const now = Date.now();
-  const tasks = member.tasks.map(t => {
-    if (t.taskId !== taskId) { return t; }
-    // Snapshot accumulated time before marking complete.
-    const extra = t.timerStartedAt !== null
-      ? Math.floor((now - t.timerStartedAt) / 1000)
-      : 0;
-    return {
-      ...t,
-      completedAt: now,
-      accumulatedSeconds: (t.accumulatedSeconds ?? 0) + extra,
-      timerStartedAt: null,
-    };
+
+  const completing = member.tasks.find(t => t.taskId === taskId);
+  if (!completing) { return; }
+  const wasFirst = completing.position === 1;
+  const extra = completing.timerStartedAt !== null
+    ? Math.floor((now - completing.timerStartedAt) / 1000)
+    : 0;
+  const completedTask: SessionTask = {
+    ...completing,
+    completedAt: now,
+    isPinned: false,
+    accumulatedSeconds: (completing!.accumulatedSeconds ?? 0) + extra,
+    timerStartedAt: null,
+  };
+
+  const remainingActive = member.tasks.filter(t => t.taskId !== taskId && t.completedAt === null);
+  const otherCompleted = member.tasks.filter(t => t.taskId !== taskId && t.completedAt !== null);
+  let updatedActive = resequenced(remainingActive);
+
+  // If the completed task was #1, start the new #1's timer.
+  if (wasFirst && updatedActive.length > 0) {
+    updatedActive[0] = startTimer(updatedActive[0], now);
+  }
+  // Also un-pin any tasks that were pinned (their timer keeps running, no change needed,
+  // but #1 is already handled above).
+
+  const newFirstId = updatedActive[0]?.taskId ?? null;
+  await memberRef.update({
+    tasks: [...updatedActive, ...otherCompleted, completedTask],
+    activeTaskId: newFirstId,
   });
-  const updates: Partial<SessionMember> = { tasks };
-  if (member.activeTaskId === taskId) { updates.activeTaskId = null; }
-  await memberRef.update(updates);
 }
 
-export async function setActiveTask(
+export async function reorderSessionTasks(
   sessionId: string,
   userId: string,
-  taskId: string | null,
+  orderedActiveTasks: SessionTask[],
+  previousFirstTaskId: string | null,
 ): Promise<void> {
   const memberRef = membersCol(sessionId).doc(userId);
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
   const now = Date.now();
-  const prevActiveId = member.activeTaskId;
+  const completedTasks = member.tasks.filter(t => t.completedAt !== null);
 
-  const tasks = member.tasks.map(t => {
-    if (t.taskId === prevActiveId && prevActiveId !== taskId) {
-      // Pause the outgoing active task.
-      const extra = t.timerStartedAt !== null
-        ? Math.floor((now - t.timerStartedAt) / 1000)
-        : 0;
-      return { ...t, accumulatedSeconds: (t.accumulatedSeconds ?? 0) + extra, timerStartedAt: null };
-    }
-    if (t.taskId === taskId && taskId !== null) {
-      // Start the incoming active task (only if not already running).
-      return { ...t, timerStartedAt: t.timerStartedAt ?? now };
-    }
-    return t;
+  const newFirstId = orderedActiveTasks[0]?.taskId ?? null;
+  const firstChanged = previousFirstTaskId !== newFirstId;
+
+  let updatedActive = resequenced(orderedActiveTasks);
+  if (firstChanged) {
+    updatedActive = updatedActive.map(t => {
+      if (t.taskId === previousFirstTaskId) { return pauseTimer(t, now); }
+      if (t.taskId === newFirstId) { return startTimer(t, now); }
+      return t;
+    });
+  }
+
+  await memberRef.update({
+    tasks: [...updatedActive, ...completedTasks],
+    activeTaskId: newFirstId,
   });
+}
 
-  await memberRef.update({ activeTaskId: taskId, tasks });
+export async function pinSessionTask(
+  sessionId: string,
+  userId: string,
+  taskId: string,
+): Promise<void> {
+  const memberRef = membersCol(sessionId).doc(userId);
+  const doc = await memberRef.get();
+  if (!doc.exists) { return; }
+  const member = doc.data() as SessionMember;
+  const now = Date.now();
+  const tasks = member.tasks.map(t =>
+    t.taskId === taskId ? startTimer({ ...t, isPinned: true }, now) : t,
+  );
+  await memberRef.update({ tasks });
+}
+
+export async function unpinSessionTask(
+  sessionId: string,
+  userId: string,
+  taskId: string,
+): Promise<void> {
+  const memberRef = membersCol(sessionId).doc(userId);
+  const doc = await memberRef.get();
+  if (!doc.exists) { return; }
+  const member = doc.data() as SessionMember;
+  const now = Date.now();
+  const tasks = member.tasks.map(t =>
+    t.taskId === taskId ? { ...pauseTimer(t, now), isPinned: false } : t,
+  );
+  await memberRef.update({ tasks });
+}
+
+// setActiveTask is kept for backward compat but is no longer used directly —
+// position #1 is always the activeTaskId now.
+export async function setActiveTask(
+  sessionId: string,
+  userId: string,
+  taskId: string | null,
+): Promise<void> {
+  await membersCol(sessionId).doc(userId).update({ activeTaskId: taskId });
 }
 
 // ─── Join requests ────────────────────────────────────────────────────────────
