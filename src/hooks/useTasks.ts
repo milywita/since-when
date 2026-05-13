@@ -38,17 +38,17 @@ export function useTasks() {
   );
 
   const completeTask = useCallback(
-    (taskId: string) => {
+    (taskId: string, remainingActiveIds: string[], completedInSessionId?: string) => {
       if (!userId) { return Promise.resolve(); }
-      return svcComplete(userId, taskId);
+      return svcComplete(userId, taskId, remainingActiveIds, completedInSessionId);
     },
     [userId],
   );
 
   const deleteTask = useCallback(
-    (taskId: string) => {
+    (taskId: string, remainingActiveIds: string[]) => {
       if (!userId) { return Promise.resolve(); }
-      return svcDelete(userId, taskId);
+      return svcDelete(userId, taskId, remainingActiveIds);
     },
     [userId],
   );

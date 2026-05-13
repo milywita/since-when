@@ -808,13 +808,19 @@ export default function HomeScreen({ navigation }: Props) {
   }, [historySections.length]);
 
   async function handleComplete(task: Task) {
-    await completeTask(task.id);
+    const remainingIds = activeTasks
+      .filter(t => t.id !== task.id)
+      .map(t => t.id);
+    await completeTask(task.id, remainingIds);
     const duration = Date.now() - task.createdAt;
     flash(`You did it. It took ${formatElapsed(duration)} but you did it.`);
   }
 
   async function handleDelete(task: Task) {
-    await deleteTask(task.id);
+    const remainingIds = activeTasks
+      .filter(t => t.id !== task.id)
+      .map(t => t.id);
+    await deleteTask(task.id, remainingIds);
   }
 
   async function handleEdit(taskId: string, title: string, estimatedMs: number | null) {

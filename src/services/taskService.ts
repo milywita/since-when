@@ -66,18 +66,31 @@ export async function addTaskFromSession(
 }
 
 /**
- * Mark a task as complete. Pass completedInSessionId when completing from inside
- * a Together session so the task is excluded from the solo history view.
+ * Mark a task as complete and resequence the remaining active tasks in a
+ * single batch so positions stay 1-based and gapless.
+ *
+ * `remainingActiveIds` — the active task IDs that should stay in the queue,
+ * already in their desired order (just exclude the completed task's id).
+ *
+ * Pass completedInSessionId when completing from inside a Together session
+ * so the task is excluded from the solo history view.
  */
 export async function completeTask(
   userId: string,
   taskId: string,
+  remainingActiveIds: string[],
   completedInSessionId?: string,
 ): Promise<void> {
-  await tasksCollection(userId).doc(taskId).update({
+  const col = tasksCollection(userId);
+  const batch = firestore().batch();
+  batch.update(col.doc(taskId), {
     completedAt: Date.now(),
     ...(completedInSessionId ? { completedInSessionId } : {}),
   });
+  remainingActiveIds.forEach((id, idx) => {
+    batch.update(col.doc(id), { position: idx + 1 });
+  });
+  await batch.commit();
 }
 
 export async function updateTask(
@@ -88,8 +101,20 @@ export async function updateTask(
   await tasksCollection(userId).doc(taskId).update(changes);
 }
 
-export async function deleteTask(userId: string, taskId: string): Promise<void> {
-  await tasksCollection(userId).doc(taskId).delete();
+/**
+ * Delete a task and resequence the remaining active tasks in a single batch.
+ *
+ * `remainingActiveIds` — the active task IDs that should stay in the queue,
+ * already in their desired order (just exclude the deleted task's id).
+ */
+export async function deleteTask(userId: string, taskId: string, remainingActiveIds: string[]): Promise<void> {
+  const col = tasksCollection(userId);
+  const batch = firestore().batch();
+  batch.delete(col.doc(taskId));
+  remainingActiveIds.forEach((id, idx) => {
+    batch.update(col.doc(id), { position: idx + 1 });
+  });
+  await batch.commit();
 }
 
 /**
