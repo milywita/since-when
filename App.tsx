@@ -6,6 +6,7 @@ import {
   DefaultTheme as NavDefaultTheme,
 } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import AuthNavigator from './src/navigation/AuthNavigator';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -57,17 +58,20 @@ function AppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <SafeAreaProvider>
-        <TaskEstimatePresetsProvider>
-          <AppContent />
-        </TaskEstimatePresetsProvider>
-      </SafeAreaProvider>
-    </ThemeProvider>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <ThemeProvider>
+        <SafeAreaProvider>
+          <TaskEstimatePresetsProvider>
+            <AppContent />
+          </TaskEstimatePresetsProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
   loading: {
     flex: 1,
     justifyContent: 'center',

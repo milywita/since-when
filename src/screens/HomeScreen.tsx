@@ -4,7 +4,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
   ScrollView,
   StyleSheet,
   Modal,
@@ -12,7 +11,10 @@ import {
   Platform,
   ActivityIndicator,
   Animated,
+  Alert,
 } from 'react-native';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import type { RenderItemParams } from 'react-native-draggable-flatlist';
 import auth from '@react-native-firebase/auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../components/ui/Screen';
@@ -23,7 +25,6 @@ import { ScreenHeader } from '../components/layout/ScreenHeader';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { useTasks } from '../hooks/useTasks';
 import { useSessionHistory } from '../hooks/useSessionHistory';
-import { SwipeableRow } from '../components/SwipeableRow';
 import type { Task } from '../types/Task';
 import type { SessionHistoryRecord } from '../types/Session';
 import type { AppScreenProps } from '../navigation/types';
@@ -59,6 +60,86 @@ const TOGETHER_LIGHT = {
 
 /** Light: TOGETHER pill text — deeper indigo than default accent for readability on white. */
 const TOGETHER_BADGE_TEXT_LIGHT = '#3730a3';
+
+// ─── Queue task row ───────────────────────────────────────────────────────────
+
+function formatAddedDate(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+type QueueTaskRowProps = {
+  task: Task;
+  position: number;
+  onComplete: () => void;
+  onDelete: () => void;
+  drag: () => void;
+  isActive: boolean;
+  c: AppTheme['colors'];
+  s: S;
+  isDark: boolean;
+};
+
+function QueueTaskRow({ task, position, onComplete, onDelete, drag, isActive, c, s, isDark }: QueueTaskRowProps) {
+  const isFirst = position === 1;
+
+  function handleLongPress() {
+    Alert.alert(task.title, 'What would you like to do?', [
+      { text: 'Delete task', style: 'destructive', onPress: onDelete },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  return (
+    <View
+      style={[
+        s.queueRow,
+        {
+          backgroundColor: isActive ? c.surfaceRaised : c.surface,
+          borderColor: isFirst ? c.accent : c.border,
+          borderWidth: isFirst ? 1.5 : 1,
+          opacity: isActive ? 0.95 : 1,
+        },
+      ]}>
+      {/* drag handle */}
+      <TouchableOpacity
+        onPressIn={drag}
+        style={s.dragHandle}
+        hitSlop={8}>
+        <Text style={[s.dragHandleText, { color: c.textDim }]}>⠿</Text>
+      </TouchableOpacity>
+
+      {/* position badge */}
+      <View
+        style={[
+          s.queueBadge,
+          { backgroundColor: isFirst ? c.accent : (isDark ? c.surfaceInset : c.surfaceSoft) },
+        ]}>
+        <Text style={[s.queueBadgeText, { color: isFirst ? c.onAccent : c.textMuted }]}>
+          {position}
+        </Text>
+      </View>
+
+      {/* content — long press to delete */}
+      <TouchableOpacity style={s.queueContent} onLongPress={handleLongPress} activeOpacity={1}>
+        <Text style={[s.queueTitle, { color: c.text }]} numberOfLines={2}>
+          {task.title}
+        </Text>
+        <Text style={[s.queueMeta, { color: c.textMuted }]}>
+          Added {formatAddedDate(task.createdAt)}
+        </Text>
+      </TouchableOpacity>
+
+      {/* done button */}
+      <TouchableOpacity
+        style={[s.queueDoneBtn, { borderColor: c.border }]}
+        onPress={onComplete}
+        hitSlop={12}>
+        <Text style={[s.queueDoneBtnText, { color: c.textMuted }]}>Done</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 // ─── Completed task row ───────────────────────────────────────────────────────
 
@@ -673,7 +754,7 @@ export default function HomeScreen({ navigation }: Props) {
   const s = useMemo(() => buildStyles(thm, isDark), [thm, isDark]);
   const { presets: timePresets } = useTaskEstimatePresets();
 
-  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask } = useTasks();
+  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -863,26 +944,31 @@ export default function HomeScreen({ navigation }: Props) {
               />
             </View>
           ) : (
-            <FlatList
-              style={s.tabBodyFill}
-              data={activeTasks}
-              keyExtractor={t => t.id}
-              renderItem={({ item }) => (
-                <SwipeableRow
-                  onDelete={() => handleDelete(item)}
-                  borderRadius={12}>
-                  <TaskCard
-                    task={item}
-                    now={now}
-                    onComplete={() => handleComplete(item)}
-                    onDelete={() => handleDelete(item)}
-                    onEdit={() => setEditingTask(item)}
-                  />
-                </SwipeableRow>
-              )}
-              contentContainerStyle={s.list}
-              showsVerticalScrollIndicator={false}
-            />
+            <View style={s.tabBodyFill}>
+              <DraggableFlatList
+                data={activeTasks}
+                keyExtractor={t => t.id}
+                renderItem={({ item, getIndex, drag, isActive }: RenderItemParams<Task>) => (
+                  <ScaleDecorator>
+                    <QueueTaskRow
+                      task={item}
+                      position={(getIndex() ?? 0) + 1}
+                      onComplete={() => handleComplete(item)}
+                      onDelete={() => handleDelete(item)}
+                      drag={drag}
+                      isActive={isActive}
+                      c={c}
+                      s={s}
+                      isDark={isDark}
+                    />
+                  </ScaleDecorator>
+                )}
+                onDragEnd={({ data }) => reorderTasks(data)}
+                contentContainerStyle={s.list}
+                showsVerticalScrollIndicator={false}
+                activationDistance={5}
+              />
+            </View>
           )}
         </>
       )}
@@ -1186,6 +1272,43 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     completedTime: { fontSize: 12, fontVariant: ['tabular-nums'] },
     completedDuration: { fontSize: 12, fontVariant: ['tabular-nums'] },
     completedEstLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5 },
+
+    // Queue task row
+    queueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: r.md,
+      padding: 14,
+    },
+    dragHandle: {
+      paddingHorizontal: 4,
+      paddingVertical: 6,
+      marginRight: sp.sm,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    dragHandleText: { fontSize: 18, lineHeight: 22 },
+    queueBadge: {
+      width: 30,
+      height: 30,
+      borderRadius: r.sm,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: sp.md,
+      flexShrink: 0,
+    },
+    queueBadgeText: { fontSize: 13, fontWeight: '700' },
+    queueContent: { flex: 1, marginRight: sp.sm },
+    queueTitle: { fontSize: 15, fontWeight: '500', marginBottom: 3 },
+    queueMeta: { fontSize: 12 },
+    queueDoneBtn: {
+      borderRadius: r.sm,
+      borderWidth: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      flexShrink: 0,
+    },
+    queueDoneBtnText: { fontSize: 13, fontWeight: '500' },
 
     // FAB
     fab: {

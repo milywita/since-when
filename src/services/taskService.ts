@@ -9,7 +9,18 @@ export async function addTask(
   title: string,
   estimatedMs: number | null,
 ): Promise<void> {
-  const ref = tasksCollection(userId).doc();
+  const col = tasksCollection(userId);
+  // Find the highest existing position across all tasks (no where clause = no composite index needed).
+  // Positions only ever increment, so using the global max is correct.
+  const tail = await col
+    .orderBy('position', 'desc')
+    .limit(1)
+    .get();
+  const maxPosition = tail.empty
+    ? 0
+    : ((tail.docs[0].data() as Task).position ?? 0);
+
+  const ref = col.doc();
   const task: Task = {
     id: ref.id,
     userId,
@@ -18,6 +29,7 @@ export async function addTask(
     completedAt: null,
     estimatedMs,
     isPublic: false,
+    position: maxPosition + 1,
   };
   await ref.set(task);
 }
@@ -47,6 +59,7 @@ export async function addTaskFromSession(
     completedAt: data.completedAt,
     estimatedMs: data.estimatedMs,
     isPublic: false,
+    position: 0, // TODO: assign proper queue position when porting session tasks back to solo
     ...(data.sessionId ? { sessionId: data.sessionId } : {}),
   };
   await ref.set(task);
@@ -79,13 +92,27 @@ export async function deleteTask(userId: string, taskId: string): Promise<void> 
   await tasksCollection(userId).doc(taskId).delete();
 }
 
+/**
+ * Batch-write new positions after a drag-to-reorder.
+ * `orderedIds` is the task ID array in the new desired order;
+ * each task gets position = its index + 1.
+ */
+export async function reorderTasks(userId: string, orderedIds: string[]): Promise<void> {
+  const col = tasksCollection(userId);
+  const batch = firestore().batch();
+  orderedIds.forEach((id, idx) => {
+    batch.update(col.doc(id), { position: idx + 1 });
+  });
+  await batch.commit();
+}
+
 export function subscribeToTasks(
   userId: string,
   onUpdate: (tasks: Task[]) => void,
   onError?: (error: Error) => void,
 ): () => void {
   return tasksCollection(userId)
-    .orderBy('createdAt', 'desc')
+    .orderBy('position', 'asc')
     .onSnapshot(
       snapshot => {
         if (!snapshot) { return; }

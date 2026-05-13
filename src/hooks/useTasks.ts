@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import auth from '@react-native-firebase/auth';
-import { subscribeToTasks, addTask as svcAdd, completeTask as svcComplete, deleteTask as svcDelete, updateTask as svcUpdate } from '../services/taskService';
+import { subscribeToTasks, addTask as svcAdd, completeTask as svcComplete, deleteTask as svcDelete, updateTask as svcUpdate, reorderTasks as svcReorder } from '../services/taskService';
 import type { Task } from '../types/Task';
 
 export function useTasks() {
@@ -61,8 +61,16 @@ export function useTasks() {
     [userId],
   );
 
+  const reorderTasks = useCallback(
+    (orderedTasks: Task[]) => {
+      if (!userId) { return Promise.resolve(); }
+      return svcReorder(userId, orderedTasks.map(t => t.id));
+    },
+    [userId],
+  );
+
   const activeTasks = tasks.filter(t => t.completedAt === null);
   const completedTasks = tasks.filter(t => t.completedAt !== null);
 
-  return { tasks, activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask };
+  return { tasks, activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks };
 }
