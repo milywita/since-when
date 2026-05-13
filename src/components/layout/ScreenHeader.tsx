@@ -44,12 +44,16 @@ export function ScreenHeader({
 }
 
 const styles = StyleSheet.create({
-  leading: { marginRight: 12 },
+  /** Top-align with title line so back is not pulled down when a badge sits under the title. */
+  leading: { marginRight: 8, justifyContent: 'flex-start' },
   center: { flex: 1, minWidth: 0 },
-  trailing: { marginLeft: 12 },
+  trailing: { marginLeft: 12, justifyContent: 'center' },
   title: {
     fontSize: 28,
     fontWeight: '700',
     letterSpacing: -0.5,
+    lineHeight: 32,
+    paddingTop: 0,
+    includeFontPadding: false,
   },
 });

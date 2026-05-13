@@ -12,8 +12,10 @@ import {
   Platform,
   ActivityIndicator,
   Animated,
+  type ViewStyle,
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Screen } from '../components/ui/Screen';
 import { useTheme, useThemeToggle } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
@@ -29,6 +31,18 @@ import type { AppScreenProps } from '../navigation/types';
 import { formatElapsed } from '../utils/formatElapsed';
 import { subscribeToUserProfile, setActiveSession } from '../services/userService';
 import { getSessionOnce } from '../services/sessionService';
+import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
+import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
+import { presetChipLabelFromMs, presetSpokenLabelFromMs } from '../utils/taskEstimatePresetLabel';
+
+/** Full-screen modal host: same layout as `StyleSheet.absoluteFillObject` (RN typings often omit that alias). */
+const MODAL_HOST_FILL: ViewStyle = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -38,15 +52,6 @@ function useNow(intervalMs = 1000) {
   }, [intervalMs]);
   return now;
 }
-
-const TIME_PRESETS: { label: string; ms: number }[] = [
-  { label: '15m',  ms: 15 * 60 * 1000 },
-  { label: '30m',  ms: 30 * 60 * 1000 },
-  { label: '1h',   ms: 60 * 60 * 1000 },
-  { label: '2h',   ms: 2 * 60 * 60 * 1000 },
-  { label: '4h',   ms: 4 * 60 * 60 * 1000 },
-  { label: '1 day', ms: 24 * 60 * 60 * 1000 },
-];
 
 /** Light theme only: Together banner + history session cards (dark uses theme tokens). */
 const TOGETHER_LIGHT = {
@@ -339,14 +344,18 @@ type AddTaskModalProps = {
   visible: boolean;
   onClose: () => void;
   onAdd: (title: string, estimatedMs: number | null) => Promise<void>;
+  timePresets: TaskEstimatePreset[];
   c: AppTheme['colors'];
   s: S;
 };
 
-function AddTaskModal({ visible, onClose, onAdd, c, s }: AddTaskModalProps) {
+function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskModalProps) {
+  const insets = useSafeAreaInsets();
+  const { spacing: sp } = useTheme();
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const contentPadBottom = sp.lg + insets.bottom;
 
   async function handleAdd() {
     const trimmed = text.trim();
@@ -369,52 +378,61 @@ function AddTaskModal({ visible, onClose, onAdd, c, s }: AddTaskModalProps) {
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={s.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+      <View style={MODAL_HOST_FILL}>
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={handleClose} />
-        <View style={s.modalSheet}>
-          <View style={s.modalHandle} />
-          <Text style={[s.modalTitle, { color: c.text }]}>What have you been avoiding?</Text>
-          <TextInput
-            style={s.modalInput}
-            placeholder="e.g. Reply to that email"
-            placeholderTextColor={c.textSoft}
-            value={text}
-            onChangeText={setText}
-            autoFocus
-            multiline
-            maxLength={120}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={handleAdd}
-          />
+        <KeyboardAvoidingView
+          style={s.modalKeyboardWrap}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}>
+          <View style={s.modalSheetShell}>
+            <View pointerEvents="none" style={s.modalBottomBleed} />
+            <View style={[s.modalSheetContent, { paddingBottom: contentPadBottom }]}>
+              <View style={s.modalHandle} />
+              <Text style={[s.modalTitle, { color: c.text }]}>What have you been avoiding?</Text>
+              <TextInput
+                style={s.modalInput}
+                placeholder="e.g. Reply to that email"
+                placeholderTextColor={c.textSoft}
+                value={text}
+                onChangeText={setText}
+                autoFocus
+                multiline
+                maxLength={120}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={handleAdd}
+              />
 
-          <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-          <View style={s.presetRow}>
-            {TIME_PRESETS.map(p => (
+              <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
+              <View style={s.presetRow}>
+                {timePresets.map((p, idx) => (
+                  <TouchableOpacity
+                    key={`${idx}-${p.ms}`}
+                    style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
+                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedMs === p.ms }}
+                    accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
+                    <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
+                      {presetChipLabelFromMs(p.ms)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <TouchableOpacity
-                key={p.ms}
-                style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
-                <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                  {p.label}
-                </Text>
+                style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
+                onPress={handleAdd}
+                disabled={!text.trim() || saving}>
+                {saving
+                  ? <ActivityIndicator color={c.primaryText} />
+                  : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Start the clock</Text>}
               </TouchableOpacity>
-            ))}
+            </View>
           </View>
-
-          <TouchableOpacity
-            style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-            onPress={handleAdd}
-            disabled={!text.trim() || saving}>
-            {saving
-              ? <ActivityIndicator color={c.primaryText} />
-              : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Start the clock</Text>}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -425,14 +443,18 @@ type EditTaskModalProps = {
   task: Task | null;
   onClose: () => void;
   onSave: (taskId: string, title: string, estimatedMs: number | null) => Promise<void>;
+  timePresets: TaskEstimatePreset[];
   c: AppTheme['colors'];
   s: S;
 };
 
-function EditTaskModal({ task, onClose, onSave, c, s }: EditTaskModalProps) {
+function EditTaskModal({ task, onClose, onSave, timePresets, c, s }: EditTaskModalProps) {
+  const insets = useSafeAreaInsets();
+  const { spacing: sp } = useTheme();
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const contentPadBottom = sp.lg + insets.bottom;
 
   useEffect(() => {
     if (task) {
@@ -454,51 +476,60 @@ function EditTaskModal({ task, onClose, onSave, c, s }: EditTaskModalProps) {
   }
 
   return (
-    <Modal visible={task !== null} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={s.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal visible={task !== null} transparent animationType="none" onRequestClose={onClose}>
+      <View style={MODAL_HOST_FILL}>
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={onClose} />
-        <View style={s.modalSheet}>
-          <View style={s.modalHandle} />
-          <Text style={[s.modalTitle, { color: c.text }]}>Edit task</Text>
-          <TextInput
-            style={s.modalInput}
-            placeholderTextColor={c.textSoft}
-            value={text}
-            onChangeText={setText}
-            autoFocus
-            multiline
-            maxLength={120}
-            returnKeyType="done"
-            blurOnSubmit
-            onSubmitEditing={handleSave}
-          />
+        <KeyboardAvoidingView
+          style={s.modalKeyboardWrap}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}>
+          <View style={s.modalSheetShell}>
+            <View pointerEvents="none" style={s.modalBottomBleed} />
+            <View style={[s.modalSheetContent, { paddingBottom: contentPadBottom }]}>
+              <View style={s.modalHandle} />
+              <Text style={[s.modalTitle, { color: c.text }]}>Edit task</Text>
+              <TextInput
+                style={s.modalInput}
+                placeholderTextColor={c.textSoft}
+                value={text}
+                onChangeText={setText}
+                autoFocus
+                multiline
+                maxLength={120}
+                returnKeyType="done"
+                blurOnSubmit
+                onSubmitEditing={handleSave}
+              />
 
-          <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-          <View style={s.presetRow}>
-            {TIME_PRESETS.map(p => (
+              <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
+              <View style={s.presetRow}>
+                {timePresets.map((p, idx) => (
+                  <TouchableOpacity
+                    key={`${idx}-${p.ms}`}
+                    style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
+                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedMs === p.ms }}
+                    accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
+                    <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
+                      {presetChipLabelFromMs(p.ms)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <TouchableOpacity
-                key={p.ms}
-                style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
-                <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                  {p.label}
-                </Text>
+                style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
+                onPress={handleSave}
+                disabled={!text.trim() || saving}>
+                {saving
+                  ? <ActivityIndicator color={c.primaryText} />
+                  : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Save changes</Text>}
               </TouchableOpacity>
-            ))}
+            </View>
           </View>
-
-          <TouchableOpacity
-            style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-            onPress={handleSave}
-            disabled={!text.trim() || saving}>
-            {saving
-              ? <ActivityIndicator color={c.primaryText} />
-              : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Save changes</Text>}
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -531,6 +562,7 @@ export default function HomeScreen({ navigation }: Props) {
   const { colors: c } = thm;
   const { isDark, toggleTheme } = useThemeToggle();
   const s = useMemo(() => buildStyles(thm, isDark), [thm, isDark]);
+  const { presets: timePresets } = useTaskEstimatePresets();
 
   const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
@@ -638,8 +670,18 @@ export default function HomeScreen({ navigation }: Props) {
                 ? <SunIcon color={c.accentMuted} />
                 : <MoonIcon color={c.accent} bgColor={c.background} />}
             </TouchableOpacity>
-            <TouchableOpacity style={s.signOutBtn} onPress={() => auth().signOut()}>
-              <Text style={[s.signOutText, { color: c.textSoft }]}>Sign out</Text>
+            <TouchableOpacity
+              style={s.settingsIconBtn}
+              onPress={() => navigation.navigate('Settings')}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings">
+              <Text
+                style={[
+                  s.settingsIcon,
+                  { color: isDark ? c.accentMuted : c.accent },
+                ]}>
+                ⚙
+              </Text>
             </TouchableOpacity>
           </View>
         }
@@ -700,16 +742,20 @@ export default function HomeScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
+      <View style={s.tabBody}>
       {/* ── Active tasks ─────────────────────────────── */}
       {tab === 'active' && (
         <>
           {activeTasks.length === 0 ? (
-            <EmptyState
-              title="Nothing to avoid."
-              subtitle="Add a task and let the guilt begin."
-            />
+            <View style={s.tabBodyFill}>
+              <EmptyState
+                title="Nothing to avoid."
+                subtitle="Add a task and let the guilt begin."
+              />
+            </View>
           ) : (
             <FlatList
+              style={s.tabBodyFill}
               data={activeTasks}
               keyExtractor={t => t.id}
               renderItem={({ item }) => (
@@ -745,7 +791,7 @@ export default function HomeScreen({ navigation }: Props) {
             const canGoNewer = historyDayIndex > 0;
 
             return (
-              <>
+              <View style={s.tabBodyFill}>
                 <View style={s.dayNav}>
                   <TouchableOpacity
                     onPress={() => setHistoryDayIndex(i => i + 1)}
@@ -769,6 +815,7 @@ export default function HomeScreen({ navigation }: Props) {
                 </View>
 
                 <ScrollView
+                  style={s.tabBodyFill}
                   contentContainerStyle={s.historyDayContent}
                   showsVerticalScrollIndicator={false}>
 
@@ -791,11 +838,12 @@ export default function HomeScreen({ navigation }: Props) {
 
                   <View style={s.historyBottomPad} />
                 </ScrollView>
-              </>
+              </View>
             );
           })()}
         </>
       )}
+      </View>
 
       {/* ── FAB ──────────────────────────────────────── */}
       {tab === 'active' && (
@@ -808,6 +856,7 @@ export default function HomeScreen({ navigation }: Props) {
         visible={modalVisible}
         onClose={() => setModalVisible(false)}
         onAdd={(title, estimatedMs) => addTask(title, estimatedMs)}
+        timePresets={timePresets}
         c={c}
         s={s}
       />
@@ -816,6 +865,7 @@ export default function HomeScreen({ navigation }: Props) {
         task={editingTask}
         onClose={() => setEditingTask(null)}
         onSave={handleEdit}
+        timePresets={timePresets}
         c={c}
         s={s}
       />
@@ -920,8 +970,14 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
 
     headerActions: { flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.xs },
     themeToggleBtn: { paddingVertical: 6, paddingHorizontal: sp.sm, justifyContent: 'center', alignItems: 'center' },
-    signOutBtn: { paddingVertical: 6, paddingHorizontal: sp.md },
-    signOutText: { fontSize: 13 },
+    settingsIconBtn: {
+      paddingVertical: 6,
+      paddingHorizontal: sp.sm,
+      justifyContent: 'center',
+      alignItems: 'center',
+      minWidth: 36,
+    },
+    settingsIcon: { fontSize: 20, lineHeight: 24 },
 
     rejoinBanner: {
       marginHorizontal: sp.gutter, marginBottom: sp.sm,
@@ -937,7 +993,7 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
 
     togetherBanner: {
       marginHorizontal: sp.gutter,
-      marginBottom: sp.md,
+      marginBottom: sp.xl,
       borderRadius: r.sm,
       paddingVertical: sp.md,
       paddingHorizontal: 14,
@@ -966,10 +1022,14 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     togetherBannerBadge,
     togetherBannerArrow: { fontSize: 20, fontWeight: '300' },
 
-    tabs: { flexDirection: 'row', paddingHorizontal: sp.gutter, marginBottom: sp.sm, gap: sp.xs },
+    tabs: { flexDirection: 'row', paddingHorizontal: sp.gutter, marginTop: sp.sm, marginBottom: sp.sm, gap: sp.xs },
     tab: { paddingVertical: 7, paddingHorizontal: 14, borderRadius: sp.sm },
     tabActive: { backgroundColor: c.surface },
     tabText: { fontSize: 14, fontWeight: '500' },
+
+    /** Fills space below tabs so list/empty state sits on a solid `c.background` (avoids transparent gap above home indicator). */
+    tabBody: { flex: 1, minHeight: 0, backgroundColor: c.background },
+    tabBodyFill: { flex: 1, minHeight: 0 },
 
     list: { paddingHorizontal: sp.gutter, paddingBottom: 100, gap: sp.md },
     historyLoading: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 48 },
@@ -1001,16 +1061,49 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     },
     fabText: { fontSize: 28, fontWeight: '300', lineHeight: 32 },
 
-    // Modal
-    modalOverlay: { flex: 1, justifyContent: 'flex-end' },
+    // Modal: full-screen host + sheet; bottomBleed covers Android nav / safe-area gaps below the sheet.
     modalBackdrop: {
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      ...MODAL_HOST_FILL,
       backgroundColor: c.backdrop,
     },
-    modalSheet: {
-      backgroundColor: c.surfaceRaised, borderTopLeftRadius: r.xl, borderTopRightRadius: r.xl,
-      paddingHorizontal: sp.xl, paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-      paddingTop: sp.lg, borderWidth: 1, borderColor: c.border,
+    modalKeyboardWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100%',
+      maxWidth: '100%',
+    },
+    /** Full-bleed to physical bottom; safe-area padding lives in `modalSheetContent` only. */
+    modalSheetShell: {
+      position: 'relative',
+      width: '100%',
+      overflow: 'visible',
+      backgroundColor: c.surfaceRaised,
+      borderTopLeftRadius: r.xl,
+      borderTopRightRadius: r.xl,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 0,
+      borderColor: c.border,
+    },
+    /** Same fill as sheet; extends below shell to mask Android gesture/nav gaps. */
+    modalBottomBleed: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: -120,
+      height: 140,
+      backgroundColor: c.surfaceRaised,
+    },
+    modalSheetContent: {
+      position: 'relative',
+      zIndex: 1,
+      paddingHorizontal: sp.xl,
+      paddingTop: sp.lg,
     },
     modalHandle: {
       width: 36, height: 4, backgroundColor: c.borderStrong,

@@ -9,9 +9,9 @@ export type SessionTask = {
 };
 
 export const EXTEND_PRESETS: { label: string; ms: number }[] = [
-  { label: '+10 min', ms: 10 * 60 * 1000 },
-  { label: '+25 min', ms: 25 * 60 * 1000 },
-  { label: '+50 min', ms: 50 * 60 * 1000 },
+  { label: '+10m', ms: 10 * 60 * 1000 },
+  { label: '+25m', ms: 25 * 60 * 1000 },
+  { label: '+50m', ms: 50 * 60 * 1000 },
 ];
 
 export type SessionMember = {
@@ -63,9 +63,9 @@ export const REACTION_OPTIONS_COMPLETED = [
 export const REACTION_OPTIONS = REACTION_OPTIONS_ACTIVE;
 
 export const SESSION_DURATION_PRESETS: { label: string; ms: number }[] = [
-  { label: '25 min', ms: 25 * 60 * 1000 },
-  { label: '50 min', ms: 50 * 60 * 1000 },
-  { label: '90 min', ms: 90 * 60 * 1000 },
+  { label: '25m', ms: 25 * 60 * 1000 },
+  { label: '50m', ms: 50 * 60 * 1000 },
+  { label: '90m', ms: 90 * 60 * 1000 },
 ];
 
 export const MAX_SESSION_TASKS = 6;

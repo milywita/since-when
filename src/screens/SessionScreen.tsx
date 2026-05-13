@@ -46,6 +46,7 @@ import {
 } from '../services/notificationService';
 import { TaskReactions } from '../components/session/TaskReactions';
 import { formatElapsed } from '../utils/formatElapsed';
+import { presetChipLabelFromMs, presetSpokenLabelFromMs } from '../utils/taskEstimatePresetLabel';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -80,14 +81,14 @@ function useDoneFlash() {
   return { opacity, message, flash };
 }
 
-const SESSION_TIME_PRESETS: { label: string; ms: number }[] = [
-  { label: '15m',   ms: 15 * 60 * 1000 },
-  { label: '30m',   ms: 30 * 60 * 1000 },
-  { label: '1h',    ms: 60 * 60 * 1000 },
-  { label: '2h',    ms: 2 * 60 * 60 * 1000 },
-  { label: '4h',    ms: 4 * 60 * 60 * 1000 },
-  { label: '1 day', ms: 24 * 60 * 60 * 1000 },
-];
+const SESSION_TIME_PRESET_MS = [
+  15 * 60 * 1000,
+  30 * 60 * 1000,
+  60 * 60 * 1000,
+  2 * 60 * 60 * 1000,
+  4 * 60 * 60 * 1000,
+  24 * 60 * 60 * 1000,
+] as const;
 
 // ─── Style factory type ───────────────────────────────────────────────────────
 
@@ -165,13 +166,16 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit, c, s }: AddTaskModalPr
               />
               <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it take?</Text>
               <View style={s.estimateRow}>
-                {SESSION_TIME_PRESETS.map(p => (
+                {SESSION_TIME_PRESET_MS.map(ms => (
                   <TouchableOpacity
-                    key={p.ms}
-                    style={[s.estimateChip, selectedMs === p.ms && s.estimateChipSelected]}
-                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}>
-                    <Text style={[s.estimateChipText, selectedMs === p.ms && s.estimateChipTextSelected]}>
-                      {p.label}
+                    key={ms}
+                    style={[s.estimateChip, selectedMs === ms && s.estimateChipSelected]}
+                    onPress={() => setSelectedMs(prev => prev === ms ? null : ms)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: selectedMs === ms }}
+                    accessibilityLabel={presetSpokenLabelFromMs(ms)}>
+                    <Text style={[s.estimateChipText, selectedMs === ms && s.estimateChipTextSelected]}>
+                      {presetChipLabelFromMs(ms)}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -307,14 +311,14 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
                   style={[s.extendChip, busy && s.extendChipDisabled]}
                   onPress={() => handleExtend(p.ms)}
                   disabled={busy}>
-                  <Text style={[s.extendChipText, { color: c.accent }]}>{p.label}</Text>
+                  <Text style={s.extendChipText}>{p.label}</Text>
                 </TouchableOpacity>
               ))}
               <TouchableOpacity
                 style={[s.extendChip, busy && s.extendChipDisabled]}
                 onPress={() => setCustomModalVisible(true)}
                 disabled={busy}>
-                <Text style={[s.extendChipText, { color: c.accent }]}>Custom</Text>
+                <Text style={s.extendChipText}>Custom</Text>
               </TouchableOpacity>
             </View>
             <TouchableOpacity
@@ -1142,18 +1146,27 @@ function buildStyles(thm: AppTheme) {
       alignItems: 'center', zIndex: 50, paddingHorizontal: sp.xxl,
     },
     extendCard: {
-      width: '100%', backgroundColor: c.surfaceRaised, borderRadius: 18,
-      borderWidth: 1, borderColor: c.border, padding: 28, gap: sp.md, alignItems: 'center',
+      width: '100%',
+      backgroundColor: c.surfaceRaised,
+      borderRadius: r.lg,
+      borderWidth: 1,
+      borderColor: c.border,
+      padding: sp.xl,
+      gap: sp.md,
+      alignItems: 'center',
     },
     extendTitle: { fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
     extendSubtitle: { fontSize: 15, lineHeight: 21, textAlign: 'center' },
     extendBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginTop: sp.xs, justifyContent: 'center' },
     extendChip: {
-      backgroundColor: c.surface, borderRadius: r.sm, borderWidth: 1,
-      borderColor: c.accent, paddingVertical: sp.md, paddingHorizontal: sp.gutter,
+      borderRadius: sp.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 7,
+      paddingHorizontal: 13,
     },
     extendChipDisabled: { opacity: 0.4 },
-    extendChipText: { fontSize: 15, fontWeight: '600' },
+    extendChipText: { fontSize: 13, fontWeight: '500', color: c.textMuted },
     extendEndBtn: {
       backgroundColor: 'transparent', borderRadius: r.sm, borderWidth: 1,
       borderColor: c.border, paddingVertical: sp.md, alignItems: 'center', marginTop: sp.xs,

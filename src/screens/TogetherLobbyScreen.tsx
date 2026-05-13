@@ -17,6 +17,7 @@ import {
 import auth from '@react-native-firebase/auth';
 import { EmptyState } from '../components/layout/EmptyState';
 import { ScreenHeader } from '../components/layout/ScreenHeader';
+import { ScreenHeaderBackButton } from '../components/layout/ScreenHeaderBackButton';
 import { SectionTitle } from '../components/layout/SectionTitle';
 import { Screen } from '../components/ui/Screen';
 import { useTheme } from '../theme/ThemeContext';
@@ -77,11 +78,7 @@ function TaskSelection({
   return (
     <Screen safeArea edges={['top', 'bottom']}>
       <ScreenHeader
-        leading={
-          <TouchableOpacity style={s.backBtn} onPress={onBack}>
-            <Text style={[s.backBtnText, { color: c.textSoft }]}>← Back</Text>
-          </TouchableOpacity>
-        }
+        leading={<ScreenHeaderBackButton onPress={onBack} accessibilityLabel="Leave task selection" />}
         title="Together"
         badge={{ text: subtitle, variant: 'accent' }}
       />
@@ -416,6 +413,12 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
     return (
       <Screen safeArea edges={['top', 'bottom']}>
         <ScreenHeader
+          leading={
+            <ScreenHeaderBackButton
+              onPress={handleWithdrawRequest}
+              accessibilityLabel="Cancel join request and go back"
+            />
+          }
           title="Together"
           badge={{ text: 'WAITING', variant: 'accent' }}
         />
@@ -461,11 +464,7 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   return (
     <Screen safeArea edges={['top', 'bottom']}>
       <ScreenHeader
-        leading={
-          <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={[s.backBtnText, { color: c.textSoft }]}>← Back</Text>
-          </TouchableOpacity>
-        }
+        leading={<ScreenHeaderBackButton onPress={() => navigation.goBack()} />}
         title="Together"
         badge={{ text: 'TOGETHER', variant: 'accent' }}
       />
@@ -641,9 +640,6 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
 function buildStyles(thm: AppTheme) {
   const { colors: c, spacing: sp, radius: r } = thm;
   return StyleSheet.create({
-    backBtn: { paddingVertical: sp.xs, marginTop: sp.xs },
-    backBtnText: { fontSize: 14 },
-
     scroll: { flex: 1 },
     scrollContent: { paddingHorizontal: sp.gutter, paddingBottom: 40, gap: 0 },
 

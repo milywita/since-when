@@ -1,15 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  DarkTheme as NavDarkTheme,
+  DefaultTheme as NavDefaultTheme,
+} from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
 import AuthNavigator from './src/navigation/AuthNavigator';
 import AppNavigator from './src/navigation/AppNavigator';
-import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { ThemeProvider, useTheme, useThemeToggle } from './src/theme/ThemeContext';
+import { TaskEstimatePresetsProvider } from './src/context/TaskEstimatePresetsContext';
 
 function AppContent() {
   const { colors: c } = useTheme();
+  const { isDark } = useThemeToggle();
   const [initialising, setInitialising] = useState(true);
   const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
+
+  const navigationTheme = useMemo(
+    () => ({
+      ...(isDark ? NavDarkTheme : NavDefaultTheme),
+      colors: {
+        ...(isDark ? NavDarkTheme.colors : NavDefaultTheme.colors),
+        background: c.background,
+        card: c.background,
+      },
+    }),
+    [c.background, isDark],
+  );
 
   useEffect(() => {
     const unsubscribe = auth().onAuthStateChanged(currentUser => {
@@ -30,7 +49,7 @@ function AppContent() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       {user ? <AppNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );
@@ -39,7 +58,11 @@ function AppContent() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AppContent />
+      <SafeAreaProvider>
+        <TaskEstimatePresetsProvider>
+          <AppContent />
+        </TaskEstimatePresetsProvider>
+      </SafeAreaProvider>
     </ThemeProvider>
   );
 }

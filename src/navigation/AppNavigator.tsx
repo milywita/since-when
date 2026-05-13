@@ -5,6 +5,7 @@ import auth from '@react-native-firebase/auth';
 import HomeScreen from '../screens/HomeScreen';
 import TogetherLobbyScreen from '../screens/TogetherLobbyScreen';
 import SessionScreen from '../screens/SessionScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import UsernameSetupScreen from '../screens/UsernameSetupScreen';
 import { getOrCreateUserProfile } from '../services/userService';
 import { useTheme } from '../theme/ThemeContext';
@@ -38,10 +39,14 @@ export default function AppNavigator() {
 
   return (
     <Stack.Navigator
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        contentStyle: { backgroundColor: c.background },
+      }}
       initialRouteName={needsUsername ? 'UsernameSetup' : 'Home'}>
       <Stack.Screen name="UsernameSetup" component={UsernameSetupScreen} />
       <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="TogetherLobby" component={TogetherLobbyScreen} />
       <Stack.Screen name="Session" component={SessionScreen} />
     </Stack.Navigator>
