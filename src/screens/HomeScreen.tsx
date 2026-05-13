@@ -12,7 +12,6 @@ import {
   Platform,
   ActivityIndicator,
   Animated,
-  type ViewStyle,
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,13 +40,6 @@ import {
 } from '../types/settingsPreferences';
 
 /** Full-screen modal host: same layout as `StyleSheet.absoluteFillObject` (RN typings often omit that alias). */
-const MODAL_HOST_FILL: ViewStyle = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-};
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -397,14 +389,12 @@ function stashAdvancedDraftForLater(draft: {
 
 function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskModalProps) {
   const insets = useSafeAreaInsets();
-  const { spacing: sp } = useTheme();
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reminderPresetOverride, setReminderPresetOverride] = useState<ReminderPreset | null>(null);
   const [togetherVisibilityOverride, setTogetherVisibilityOverride] = useState<TogetherVisibility | null>(null);
-  const contentPadBottom = sp.lg + insets.bottom;
   const selectedReminderPreset = reminderPresetOverride ?? SETTINGS_DEFAULTS.reminderPreset;
   const selectedTogetherVisibility = togetherVisibilityOverride ?? SETTINGS_DEFAULTS.togetherVisibility;
 
@@ -443,120 +433,115 @@ function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskMod
     onClose();
   }
 
+  const cardBottom = insets.bottom + 100;
+
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View style={MODAL_HOST_FILL}>
-        <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={handleClose} />
-        <KeyboardAvoidingView
-          style={s.modalKeyboardWrap}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={0}>
-          <View style={s.modalSheetShell}>
-            <View pointerEvents="none" style={s.modalBottomBleed} />
-            <View style={[s.modalSheetContent, { paddingBottom: contentPadBottom }]}>
-              <View style={s.modalHandle} />
-              <Text style={[s.modalTitle, { color: c.text }]}>What have you been avoiding?</Text>
-              <TextInput
-                style={s.modalInput}
-                placeholder="e.g. Reply to that email"
-                placeholderTextColor={c.textSoft}
-                value={text}
-                onChangeText={setText}
-                autoFocus
-                multiline
-                maxLength={120}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={handleAdd}
-              />
-
-              <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-              <View style={s.presetRow}>
-                {timePresets.map((p, idx) => (
-                  <TouchableOpacity
-                    key={`${idx}-${p.ms}`}
-                    style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: selectedMs === p.ms }}
-                    accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
-                    <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                      {presetChipLabelFromMs(p.ms)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <TouchableOpacity
-                style={s.advancedToggleRow}
-                onPress={() => setAdvancedOpen(prev => !prev)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: advancedOpen }}>
-                <Text style={[s.advancedToggleLabel, { color: c.textSoft }]}>Advanced options</Text>
-                <Text style={[s.advancedToggleChevron, { color: c.textDim }]}>
-                  {advancedOpen ? '▲' : '▼'}
-                </Text>
-              </TouchableOpacity>
-
-              {advancedOpen && (
-                <View style={s.advancedCard}>
-                  <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Reminder preset</Text>
-                  <View style={s.advancedChipRow}>
-                    {REMINDER_PRESET_OPTIONS.map(opt => (
-                      <TouchableOpacity
-                        key={opt.id}
-                        style={[s.advancedChip, selectedReminderPreset === opt.id && s.advancedChipSelected]}
-                        onPress={() => setReminderPresetOverride(opt.id)}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        style={s.popupHost}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={handleClose} />
+        <View style={[s.popupCard, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+          <ScrollView
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={s.popupScroll}>
+            <Text style={[s.popupTitle, { color: c.text }]}>What have you been avoiding?</Text>
+            <TextInput
+              style={s.modalInput}
+              placeholder="e.g. Reply to that email"
+              placeholderTextColor={c.textSoft}
+              value={text}
+              onChangeText={setText}
+              autoFocus
+              multiline
+              maxLength={120}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={handleAdd}
+            />
+            <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
+            <View style={s.presetRow}>
+              {timePresets.map((p, idx) => (
+                <TouchableOpacity
+                  key={`${idx}-${p.ms}`}
+                  style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
+                  onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedMs === p.ms }}
+                  accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
+                  <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
+                    {presetChipLabelFromMs(p.ms)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity
+              style={s.advancedToggleRow}
+              onPress={() => setAdvancedOpen(prev => !prev)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: advancedOpen }}>
+              <Text style={[s.advancedToggleLabel, { color: c.textSoft }]}>Advanced options</Text>
+              <Text style={[s.advancedToggleChevron, { color: c.textDim }]}>
+                {advancedOpen ? '▲' : '▼'}
+              </Text>
+            </TouchableOpacity>
+            {advancedOpen && (
+              <View style={s.advancedCard}>
+                <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Reminder preset</Text>
+                <View style={s.advancedChipRow}>
+                  {REMINDER_PRESET_OPTIONS.map(opt => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[s.advancedChip, selectedReminderPreset === opt.id && s.advancedChipSelected]}
+                      onPress={() => setReminderPresetOverride(opt.id)}>
+                      <Text
+                        style={[
+                          s.advancedChipText,
+                          { color: selectedReminderPreset === opt.id ? c.primaryText : c.textMuted },
+                        ]}>
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Together Mode visibility</Text>
+                <View style={s.advancedChipRow}>
+                  {TOGETHER_VISIBILITY_OPTIONS.map(opt => (
+                    <TouchableOpacity
+                      key={opt.id}
+                      style={[s.advancedChip, selectedTogetherVisibility === opt.id && s.advancedChipSelected]}
+                      onPress={() => setTogetherVisibilityOverride(opt.id)}>
+                      <View style={s.advancedChipContent}>
+                        <VisibilityEyeIcon
+                          color={selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted}
+                          crossed={opt.id === 'hidden'}
+                        />
                         <Text
                           style={[
                             s.advancedChipText,
-                            { color: selectedReminderPreset === opt.id ? c.primaryText : c.textMuted },
+                            { color: selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted },
                           ]}>
                           {opt.label}
                         </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-
-                  <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Together Mode visibility</Text>
-                  <View style={s.advancedChipRow}>
-                    {TOGETHER_VISIBILITY_OPTIONS.map(opt => (
-                      <TouchableOpacity
-                        key={opt.id}
-                        style={[s.advancedChip, selectedTogetherVisibility === opt.id && s.advancedChipSelected]}
-                        onPress={() => setTogetherVisibilityOverride(opt.id)}>
-                        <View style={s.advancedChipContent}>
-                          <VisibilityEyeIcon
-                            color={selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted}
-                            crossed={opt.id === 'hidden'}
-                          />
-                          <Text
-                            style={[
-                              s.advancedChipText,
-                              { color: selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted },
-                            ]}>
-                            {opt.label}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
                 </View>
-              )}
-
-              <TouchableOpacity
-                style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-                onPress={handleAdd}
-                disabled={!text.trim() || saving}>
-                {saving
-                  ? <ActivityIndicator color={c.primaryText} />
-                  : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Start the clock</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-
-      </View>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
+              onPress={handleAdd}
+              disabled={!text.trim() || saving}>
+              {saving
+                ? <ActivityIndicator color={c.primaryText} />
+                : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Start the clock</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -574,11 +559,9 @@ type EditTaskModalProps = {
 
 function EditTaskModal({ task, onClose, onSave, timePresets, c, s }: EditTaskModalProps) {
   const insets = useSafeAreaInsets();
-  const { spacing: sp } = useTheme();
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const contentPadBottom = sp.lg + insets.bottom;
 
   useEffect(() => {
     if (task) {
@@ -599,61 +582,60 @@ function EditTaskModal({ task, onClose, onSave, timePresets, c, s }: EditTaskMod
     }
   }
 
+  const cardBottom = insets.bottom + 100;
+
   return (
-    <Modal visible={task !== null} transparent animationType="none" onRequestClose={onClose}>
-      <View style={MODAL_HOST_FILL}>
-        <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={onClose} />
-        <KeyboardAvoidingView
-          style={s.modalKeyboardWrap}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={0}>
-          <View style={s.modalSheetShell}>
-            <View pointerEvents="none" style={s.modalBottomBleed} />
-            <View style={[s.modalSheetContent, { paddingBottom: contentPadBottom }]}>
-              <View style={s.modalHandle} />
-              <Text style={[s.modalTitle, { color: c.text }]}>Edit task</Text>
-              <TextInput
-                style={s.modalInput}
-                placeholderTextColor={c.textSoft}
-                value={text}
-                onChangeText={setText}
-                autoFocus
-                multiline
-                maxLength={120}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={handleSave}
-              />
-
-              <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
-              <View style={s.presetRow}>
-                {timePresets.map((p, idx) => (
-                  <TouchableOpacity
-                    key={`${idx}-${p.ms}`}
-                    style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
-                    onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: selectedMs === p.ms }}
-                    accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
-                    <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
-                      {presetChipLabelFromMs(p.ms)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              <TouchableOpacity
-                style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-                onPress={handleSave}
-                disabled={!text.trim() || saving}>
-                {saving
-                  ? <ActivityIndicator color={c.primaryText} />
-                  : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Save changes</Text>}
-              </TouchableOpacity>
+    <Modal visible={task !== null} transparent animationType="fade" onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        style={s.popupHost}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={[s.popupCard, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+          <ScrollView
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={s.popupScroll}>
+            <Text style={[s.popupTitle, { color: c.text }]}>Edit task</Text>
+            <TextInput
+              style={s.modalInput}
+              placeholderTextColor={c.textSoft}
+              value={text}
+              onChangeText={setText}
+              autoFocus
+              multiline
+              maxLength={120}
+              returnKeyType="done"
+              blurOnSubmit
+              onSubmitEditing={handleSave}
+            />
+            <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it actually take?</Text>
+            <View style={s.presetRow}>
+              {timePresets.map((p, idx) => (
+                <TouchableOpacity
+                  key={`${idx}-${p.ms}`}
+                  style={[s.presetChip, selectedMs === p.ms && s.presetChipSelected]}
+                  onPress={() => setSelectedMs(prev => prev === p.ms ? null : p.ms)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: selectedMs === p.ms }}
+                  accessibilityLabel={presetSpokenLabelFromMs(p.ms)}>
+                  <Text style={[s.presetChipText, selectedMs === p.ms && s.presetChipTextSelected]}>
+                    {presetChipLabelFromMs(p.ms)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
+            <TouchableOpacity
+              style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
+              onPress={handleSave}
+              disabled={!text.trim() || saving}>
+              {saving
+                ? <ActivityIndicator color={c.primaryText} />
+                : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Save changes</Text>}
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -1212,62 +1194,38 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     },
     fabText: { fontSize: 28, fontWeight: '300', lineHeight: 32 },
 
-    // Modal: full-screen host + sheet; bottomBleed covers Android nav / safe-area gaps below the sheet.
-    modalBackdrop: {
-      ...MODAL_HOST_FILL,
-      backgroundColor: c.backdrop,
+    // Floating popup card
+    popupHost: {
+      flex: 1,
+      justifyContent: 'flex-end',
     },
-    modalKeyboardWrap: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      width: '100%',
-      maxWidth: '100%',
+    popupBackdrop: {
+      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: 'transparent',
     },
-    /** Full-bleed to physical bottom; safe-area padding lives in `modalSheetContent` only. */
-    modalSheetShell: {
-      position: 'relative',
-      width: '100%',
-      overflow: 'visible',
-      backgroundColor: c.surfaceRaised,
-      borderTopLeftRadius: r.xl,
-      borderTopRightRadius: r.xl,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
-      borderTopWidth: 1,
-      borderLeftWidth: 1,
-      borderRightWidth: 1,
-      borderBottomWidth: 0,
-      borderColor: c.border,
+    popupCard: {
+      marginHorizontal: sp.lg,
+      borderRadius: 20,
+      borderWidth: 1,
+      maxHeight: '80%',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.18,
+      shadowRadius: 24,
+      elevation: 12,
     },
-    /** Same fill as sheet; extends below shell to mask Android gesture/nav gaps. */
-    modalBottomBleed: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: -120,
-      height: 140,
-      backgroundColor: c.surfaceRaised,
+    popupScroll: {
+      padding: sp.xl,
+      gap: 14,
     },
-    modalSheetContent: {
-      position: 'relative',
-      zIndex: 1,
-      paddingHorizontal: sp.xl,
-      paddingTop: sp.lg,
-    },
-    modalHandle: {
-      width: 36, height: 4, backgroundColor: c.borderStrong,
-      borderRadius: 2, alignSelf: 'center', marginBottom: 20,
-    },
-    modalTitle: { fontSize: 18, fontWeight: '600', marginBottom: sp.lg },
+    popupTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
     modalInput: {
       backgroundColor: c.surface, color: c.text, borderRadius: r.sm,
       paddingHorizontal: sp.lg, paddingVertical: 14, fontSize: 16,
-      borderWidth: 1, borderColor: c.border, marginBottom: 14, minHeight: 52,
+      borderWidth: 1, borderColor: c.border, minHeight: 52,
     },
-    estimateLabel: { fontSize: 13, marginBottom: 10 },
-    presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm, marginBottom: sp.lg },
+    estimateLabel: { fontSize: 13 },
+    presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: sp.sm },
     presetChip: { borderRadius: sp.sm, borderWidth: 1, borderColor: c.border, paddingVertical: 7, paddingHorizontal: 13 },
     presetChipSelected: { backgroundColor: c.primary, borderColor: c.primary },
     presetChipText: { color: c.textMuted, fontSize: 13, fontWeight: '500' },
