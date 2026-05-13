@@ -11,7 +11,6 @@ import {
   Platform,
   ActivityIndicator,
   Animated,
-  Alert,
 } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
@@ -68,11 +67,87 @@ function formatAddedDate(ms: number): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function formatSeconds(totalSec: number): string {
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (days > 0) { return `${days}d ${hours}h ${mins}m`; }
+  if (hours > 0) { return `${hours}h ${mins}m ${secs}s`; }
+  if (mins > 0) { return `${mins}m ${secs}s`; }
+  return `${secs}s`;
+}
+
+// ─── Task action sheet ────────────────────────────────────────────────────────
+
+type TaskActionSheetProps = {
+  task: Task | null;
+  onClose: () => void;
+  onEdit: () => void;
+  onComplete: () => void;
+  onDelete: () => void;
+  c: AppTheme['colors'];
+  s: S;
+  insetBottom: number;
+};
+
+function TaskActionSheet({ task, onClose, onEdit, onComplete, onDelete, c, s, insetBottom }: TaskActionSheetProps) {
+  if (!task) { return null; }
+
+  function act(fn: () => void) {
+    onClose();
+    setTimeout(fn, 120);
+  }
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.popupHost}>
+        <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={onClose} />
+        <View
+          style={[
+            s.popupCard,
+            s.actionSheet,
+            { marginBottom: insetBottom + 100, backgroundColor: c.surfaceRaised, borderColor: c.border },
+          ]}>
+          {/* title */}
+          <Text style={[s.actionSheetTitle, { color: c.textMuted }]} numberOfLines={2}>{task.title}</Text>
+          <View style={[s.actionSheetDivider, { backgroundColor: c.border }]} />
+
+          <TouchableOpacity style={s.actionSheetRow} onPress={() => act(onEdit)}>
+            <Text style={[s.actionSheetRowText, { color: c.text }]}>Edit task</Text>
+          </TouchableOpacity>
+          <View style={[s.actionSheetDivider, { backgroundColor: c.borderInner }]} />
+
+          <TouchableOpacity style={s.actionSheetRow} onPress={() => act(onComplete)}>
+            <Text style={[s.actionSheetRowText, { color: c.success }]}>Mark as done</Text>
+          </TouchableOpacity>
+          <View style={[s.actionSheetDivider, { backgroundColor: c.borderInner }]} />
+
+          <TouchableOpacity style={s.actionSheetRow} onPress={() => act(onDelete)}>
+            <Text style={[s.actionSheetRowText, { color: c.danger }]}>Delete task</Text>
+          </TouchableOpacity>
+          <View style={[s.actionSheetDivider, { backgroundColor: c.border }]} />
+
+          <TouchableOpacity style={s.actionSheetRow} onPress={onClose}>
+            <Text style={[s.actionSheetRowText, { color: c.textMuted }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Queue task row ───────────────────────────────────────────────────────────
+
 type QueueTaskRowProps = {
   task: Task;
   position: number;
+  now: number;
   onComplete: () => void;
   onDelete: () => void;
+  onEdit: () => void;
+  onLongPress: () => void;
+  onTogglePin: () => void;
   drag: () => void;
   isActive: boolean;
   c: AppTheme['colors'];
@@ -80,15 +155,18 @@ type QueueTaskRowProps = {
   isDark: boolean;
 };
 
-function QueueTaskRow({ task, position, onComplete, onDelete, drag, isActive, c, s, isDark }: QueueTaskRowProps) {
+function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLongPress, onTogglePin, drag, isActive, c, s, isDark }: QueueTaskRowProps) {
   const isFirst = position === 1;
+  const isTimerRunning = isFirst || task.isPinned;
 
-  function handleLongPress() {
-    Alert.alert(task.title, 'What would you like to do?', [
-      { text: 'Delete task', style: 'destructive', onPress: onDelete },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }
+  const liveSeconds = isTimerRunning
+    ? (task.accumulatedSeconds ?? 0) +
+      (task.timerStartedAt !== null ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000)) : 0)
+    : (task.accumulatedSeconds ?? 0);
+
+  const hasFocusTime = liveSeconds > 0;
+  const estimatedSec = task.estimatedMs !== null ? task.estimatedMs / 1000 : null;
+  const isOverEstimate = estimatedSec !== null && liveSeconds > estimatedSec;
 
   return (
     <View
@@ -96,38 +174,76 @@ function QueueTaskRow({ task, position, onComplete, onDelete, drag, isActive, c,
         s.queueRow,
         {
           backgroundColor: isActive ? c.surfaceRaised : c.surface,
-          borderColor: isFirst ? c.accent : c.border,
-          borderWidth: isFirst ? 1.5 : 1,
+          borderColor: isFirst ? c.accent : task.isPinned ? c.accentLight : c.border,
+          borderWidth: isFirst || task.isPinned ? 1.5 : 1,
           opacity: isActive ? 0.95 : 1,
         },
       ]}>
       {/* drag handle */}
-      <TouchableOpacity
-        onPressIn={drag}
-        style={s.dragHandle}
-        hitSlop={8}>
+      <TouchableOpacity onPressIn={drag} style={s.dragHandle} hitSlop={8}>
         <Text style={[s.dragHandleText, { color: c.textDim }]}>⠿</Text>
       </TouchableOpacity>
 
-      {/* position badge */}
-      <View
+      {/* position badge — tapping toggles pin on non-#1 tasks */}
+      <TouchableOpacity
         style={[
           s.queueBadge,
-          { backgroundColor: isFirst ? c.accent : (isDark ? c.surfaceInset : c.surfaceSoft) },
-        ]}>
-        <Text style={[s.queueBadgeText, { color: isFirst ? c.onAccent : c.textMuted }]}>
+          { backgroundColor: isFirst ? c.accent : task.isPinned ? c.accentSurface : (isDark ? c.surfaceInset : c.surfaceSoft) },
+        ]}
+        onPress={isFirst ? undefined : onTogglePin}
+        activeOpacity={isFirst ? 1 : 0.6}
+        hitSlop={6}>
+        <Text style={[s.queueBadgeText, { color: isFirst ? c.onAccent : task.isPinned ? c.accentLight : c.textMuted }]}>
           {position}
         </Text>
-      </View>
+      </TouchableOpacity>
 
-      {/* content — long press to delete */}
-      <TouchableOpacity style={s.queueContent} onLongPress={handleLongPress} activeOpacity={1}>
+      {/* content — long press opens action sheet */}
+      <TouchableOpacity style={s.queueContent} onLongPress={onLongPress} activeOpacity={1}>
         <Text style={[s.queueTitle, { color: c.text }]} numberOfLines={2}>
           {task.title}
         </Text>
-        <Text style={[s.queueMeta, { color: c.textMuted }]}>
-          Added {formatAddedDate(task.createdAt)}
-        </Text>
+
+        {isTimerRunning ? (
+          <View style={s.queueTimerRow}>
+            <Text
+              style={[s.queueTimer, { color: isOverEstimate ? c.danger : isFirst ? c.accent : c.accentLight }]}
+              numberOfLines={1}>
+              {formatSeconds(liveSeconds)}
+            </Text>
+            {estimatedSec !== null && (
+              <Text style={[s.queueEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
+                {isOverEstimate
+                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                  : `est. ${formatSeconds(estimatedSec)}`}
+              </Text>
+            )}
+          </View>
+        ) : hasFocusTime ? (
+          <View style={s.queueTimerRow}>
+            <Text style={[s.queueTimer, { color: c.textMuted }]} numberOfLines={1}>
+              {formatSeconds(liveSeconds)}
+            </Text>
+            {estimatedSec !== null && (
+              <Text style={[s.queueEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
+                {isOverEstimate
+                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                  : `est. ${formatSeconds(estimatedSec)}`}
+              </Text>
+            )}
+          </View>
+        ) : (
+          <View style={s.queueTimerRow}>
+            <Text style={[s.queueMeta, { color: c.textMuted }]}>
+              Added {formatAddedDate(task.createdAt)}
+            </Text>
+            {estimatedSec !== null && (
+              <Text style={[s.queueEstimate, { color: c.textSoft }]}>
+                est. {formatSeconds(estimatedSec)}
+              </Text>
+            )}
+          </View>
+        )}
       </TouchableOpacity>
 
       {/* done button */}
@@ -149,8 +265,12 @@ type CompletedRowProps = { task: Task; c: AppTheme['colors']; s: S };
 
 function CompletedRow({ task, c, s }: CompletedRowProps) {
   const completedAt = task.completedAt ?? 0;
-  const duration = completedAt - task.createdAt;
-  const beatEstimate = task.estimatedMs !== null && duration <= task.estimatedMs;
+  // Use actual focus time (accumulatedSeconds); fall back to wall-clock for legacy tasks
+  // that were completed before the timer system was added.
+  const focusMs = (task.accumulatedSeconds ?? 0) > 0
+    ? (task.accumulatedSeconds ?? 0) * 1000
+    : completedAt - task.createdAt;
+  const beatEstimate = task.estimatedMs !== null && focusMs <= task.estimatedMs;
   return (
     <View style={s.completedRow}>
       <View style={s.completedLeft}>
@@ -161,7 +281,7 @@ function CompletedRow({ task, c, s }: CompletedRowProps) {
       </View>
       <View style={s.completedRight}>
         <Text style={[s.completedTime, { color: c.textSoft }]}>{formatTime(completedAt)}</Text>
-        <Text style={[s.completedDuration, { color: c.textDim }]}>{formatElapsed(duration)}</Text>
+        <Text style={[s.completedDuration, { color: c.textDim }]}>{formatElapsed(focusMs)}</Text>
         {task.estimatedMs !== null && (
           <Text style={[s.completedEstLabel, { color: beatEstimate ? c.success : c.dangerMuted }]}>
             {beatEstimate ? 'on time' : 'late'}
@@ -753,11 +873,13 @@ export default function HomeScreen({ navigation }: Props) {
   const { isDark, toggleTheme } = useThemeToggle();
   const s = useMemo(() => buildStyles(thm, isDark), [thm, isDark]);
   const { presets: timePresets } = useTaskEstimatePresets();
+  const insets = useSafeAreaInsets();
 
-  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks } = useTasks();
+  const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks, pinTask, unpinTask } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [actionSheetTask, setActionSheetTask] = useState<Task | null>(null);
   const [tab, setTab] = useState<ActiveTab>('active');
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
@@ -808,19 +930,28 @@ export default function HomeScreen({ navigation }: Props) {
   }, [historySections.length]);
 
   async function handleComplete(task: Task) {
-    const remainingIds = activeTasks
-      .filter(t => t.id !== task.id)
-      .map(t => t.id);
-    await completeTask(task.id, remainingIds);
-    const duration = Date.now() - task.createdAt;
-    flash(`You did it. It took ${formatElapsed(duration)} but you did it.`);
+    const remaining = activeTasks.filter(t => t.id !== task.id);
+    await completeTask(task, remaining);
+    // Calculate focus time: snapshot accumulated + any live session time
+    const liveSecs = task.timerStartedAt !== null
+      ? Math.floor((Date.now() - task.timerStartedAt) / 1000)
+      : 0;
+    const focusSecs = (task.accumulatedSeconds ?? 0) + liveSecs;
+    const focusMs = focusSecs > 0 ? focusSecs * 1000 : Date.now() - task.createdAt;
+    flash(`You did it. It took ${formatElapsed(focusMs)} but you did it.`);
   }
 
   async function handleDelete(task: Task) {
-    const remainingIds = activeTasks
-      .filter(t => t.id !== task.id)
-      .map(t => t.id);
-    await deleteTask(task.id, remainingIds);
+    const remaining = activeTasks.filter(t => t.id !== task.id);
+    await deleteTask(task, remaining);
+  }
+
+  async function handleTogglePin(task: Task) {
+    if (task.isPinned) {
+      await unpinTask(task);
+    } else {
+      await pinTask(task);
+    }
   }
 
   async function handleEdit(taskId: string, title: string, estimatedMs: number | null) {
@@ -959,8 +1090,12 @@ export default function HomeScreen({ navigation }: Props) {
                     <QueueTaskRow
                       task={item}
                       position={(getIndex() ?? 0) + 1}
+                      now={now}
                       onComplete={() => handleComplete(item)}
                       onDelete={() => handleDelete(item)}
+                      onEdit={() => setEditingTask(item)}
+                      onLongPress={() => setActionSheetTask(item)}
+                      onTogglePin={() => handleTogglePin(item)}
                       drag={drag}
                       isActive={isActive}
                       c={c}
@@ -969,7 +1104,7 @@ export default function HomeScreen({ navigation }: Props) {
                     />
                   </ScaleDecorator>
                 )}
-                onDragEnd={({ data }) => reorderTasks(data)}
+                onDragEnd={({ data }) => reorderTasks(data, activeTasks[0] ?? null)}
                 contentContainerStyle={s.list}
                 showsVerticalScrollIndicator={false}
                 activationDistance={5}
@@ -1069,6 +1204,17 @@ export default function HomeScreen({ navigation }: Props) {
         timePresets={timePresets}
         c={c}
         s={s}
+      />
+
+      <TaskActionSheet
+        task={actionSheetTask}
+        onClose={() => setActionSheetTask(null)}
+        onEdit={() => { setEditingTask(actionSheetTask); setActionSheetTask(null); }}
+        onComplete={() => actionSheetTask && handleComplete(actionSheetTask)}
+        onDelete={() => actionSheetTask && handleDelete(actionSheetTask)}
+        c={c}
+        s={s}
+        insetBottom={insets.bottom}
       />
     </Screen>
   );
@@ -1307,6 +1453,9 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     queueContent: { flex: 1, marginRight: sp.sm },
     queueTitle: { fontSize: 15, fontWeight: '500', marginBottom: 3 },
     queueMeta: { fontSize: 12 },
+    queueTimerRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+    queueTimer: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    queueEstimate: { fontSize: 12, fontVariant: ['tabular-nums'] },
     queueDoneBtn: {
       borderRadius: r.sm,
       borderWidth: 1,
@@ -1335,6 +1484,24 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
       position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
       backgroundColor: 'transparent',
     },
+
+    // Task action sheet (extends popupCard)
+    actionSheet: { overflow: 'hidden' },
+    actionSheetTitle: {
+      fontSize: 13,
+      fontWeight: '600',
+      letterSpacing: 0.2,
+      textAlign: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: sp.xl,
+    },
+    actionSheetDivider: { height: StyleSheet.hairlineWidth },
+    actionSheetRow: {
+      paddingVertical: 17,
+      paddingHorizontal: sp.xl,
+      alignItems: 'center',
+    },
+    actionSheetRowText: { fontSize: 17, fontWeight: '400' },
     popupCard: {
       marginHorizontal: sp.lg,
       borderRadius: 20,

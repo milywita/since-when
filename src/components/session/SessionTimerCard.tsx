@@ -19,7 +19,12 @@ export function SessionTimerCard({
   onClearFocus,
 }: SessionTimerCardProps) {
   const { colors: c, spacing: sp, radius: r } = useTheme();
-  const elapsed = now - task.createdAt;
+  // Live focused time: accumulated seconds + any ongoing session since timerStartedAt.
+  const liveSecs = task.timerStartedAt !== null
+    ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000))
+    : 0;
+  const focusSecs = (task.accumulatedSeconds ?? 0) + liveSecs;
+  const elapsed = focusSecs * 1000;
   const isOld = elapsed > 86400 * 1000;
   const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
 

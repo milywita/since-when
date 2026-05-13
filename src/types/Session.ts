@@ -6,6 +6,13 @@ export type SessionTask = {
   createdAt: number;
   completedAt: number | null;
   estimatedMs: number | null;
+  /** Seconds accumulated while this task was the active/focused task in the session. */
+  accumulatedSeconds: number;
+  /**
+   * Unix ms timestamp of when the current active focus session started.
+   * Non-null while this task is the activeTaskId. Live elapsed = accumulatedSeconds + (now - timerStartedAt) / 1000.
+   */
+  timerStartedAt: number | null;
 };
 
 export const EXTEND_PRESETS: { label: string; ms: number }[] = [

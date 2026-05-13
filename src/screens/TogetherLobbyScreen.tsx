@@ -292,6 +292,8 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
         createdAt: t.createdAt,
         completedAt: null,
         estimatedMs: t.estimatedMs ?? null,
+        accumulatedSeconds: 0,
+        timerStartedAt: null,
       }));
   }
 

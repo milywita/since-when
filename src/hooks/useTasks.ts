@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import auth from '@react-native-firebase/auth';
-import { subscribeToTasks, addTask as svcAdd, completeTask as svcComplete, deleteTask as svcDelete, updateTask as svcUpdate, reorderTasks as svcReorder } from '../services/taskService';
+import { subscribeToTasks, addTask as svcAdd, completeTask as svcComplete, deleteTask as svcDelete, updateTask as svcUpdate, reorderTasks as svcReorder, pinTask as svcPin, unpinTask as svcUnpin } from '../services/taskService';
 import type { Task } from '../types/Task';
 
 export function useTasks() {
@@ -29,26 +29,29 @@ export function useTasks() {
     return unsubscribe;
   }, [userId]);
 
+  const activeTasks = tasks.filter(t => t.completedAt === null);
+  const completedTasks = tasks.filter(t => t.completedAt !== null);
+
   const addTask = useCallback(
     (title: string, estimatedMs: number | null) => {
       if (!userId) { return Promise.resolve(); }
-      return svcAdd(userId, title, estimatedMs);
+      return svcAdd(userId, title, estimatedMs, activeTasks.length);
     },
-    [userId],
+    [userId, activeTasks.length],
   );
 
   const completeTask = useCallback(
-    (taskId: string, remainingActiveIds: string[], completedInSessionId?: string) => {
+    (completingTask: Task, remainingActiveTasks: Task[], completedInSessionId?: string) => {
       if (!userId) { return Promise.resolve(); }
-      return svcComplete(userId, taskId, remainingActiveIds, completedInSessionId);
+      return svcComplete(userId, completingTask, remainingActiveTasks, completedInSessionId);
     },
     [userId],
   );
 
   const deleteTask = useCallback(
-    (taskId: string, remainingActiveIds: string[]) => {
+    (deletingTask: Task, remainingActiveTasks: Task[]) => {
       if (!userId) { return Promise.resolve(); }
-      return svcDelete(userId, taskId, remainingActiveIds);
+      return svcDelete(userId, deletingTask, remainingActiveTasks);
     },
     [userId],
   );
@@ -62,15 +65,28 @@ export function useTasks() {
   );
 
   const reorderTasks = useCallback(
-    (orderedTasks: Task[]) => {
+    (orderedTasks: Task[], previousFirstTask: Task | null) => {
       if (!userId) { return Promise.resolve(); }
-      return svcReorder(userId, orderedTasks.map(t => t.id));
+      return svcReorder(userId, orderedTasks, previousFirstTask);
     },
     [userId],
   );
 
-  const activeTasks = tasks.filter(t => t.completedAt === null);
-  const completedTasks = tasks.filter(t => t.completedAt !== null);
+  const pinTask = useCallback(
+    (task: Task) => {
+      if (!userId) { return Promise.resolve(); }
+      return svcPin(userId, task);
+    },
+    [userId],
+  );
 
-  return { tasks, activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks };
+  const unpinTask = useCallback(
+    (task: Task) => {
+      if (!userId) { return Promise.resolve(); }
+      return svcUnpin(userId, task);
+    },
+    [userId],
+  );
+
+  return { tasks, activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks, pinTask, unpinTask };
 }

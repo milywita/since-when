@@ -15,7 +15,7 @@ import {
 } from '../services/sessionService';
 import { setActiveSession } from '../services/userService';
 import {
-  completeTask as svcCompleteSoloTask,
+  markSoloTaskCompleteFromSession as svcCompleteSoloTask,
   addTaskFromSession as svcAddTaskFromSession,
 } from '../services/taskService';
 import { saveSessionHistory } from '../services/historyService';
@@ -148,6 +148,7 @@ export function useSession(sessionId: string) {
           completedAt: task.completedAt,
           estimatedMs: task.estimatedMs ?? null,
           sessionId,
+          accumulatedSeconds: task.accumulatedSeconds ?? 0,
         }).catch(err =>
           console.warn('[useSession] syncMyTasksToSolo failed for task:', task.title, err.message),
         ),

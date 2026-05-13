@@ -545,7 +545,12 @@ type MyTaskRowProps = {
 };
 
 function MyTaskRow({ task, now, isActive, receivedReactions, onComplete, onSetActive, onClearActive, c, s }: MyTaskRowProps) {
-  const elapsed = now - task.createdAt;
+  // Live focused time: accumulated seconds + any ongoing session since timerStartedAt.
+  const liveSecs = task.timerStartedAt !== null
+    ? Math.max(0, Math.floor((now - task.timerStartedAt) / 1000))
+    : 0;
+  const focusSecs = (task.accumulatedSeconds ?? 0) + liveSecs;
+  const elapsed = focusSecs * 1000;
   const isOld = elapsed > 86400 * 1000;
   const isDone = task.completedAt !== null;
   const overEstimate = task.estimatedMs != null && elapsed > task.estimatedMs;
@@ -597,7 +602,7 @@ function MyTaskRow({ task, now, isActive, receivedReactions, onComplete, onSetAc
         )}
         {isDone && (
           <Text style={[s.myTaskDoneLabel, { color: c.success }]}>
-            Done in {formatElapsed((task.completedAt ?? 0) - task.createdAt)}
+            Done in {formatElapsed((task.accumulatedSeconds ?? 0) > 0 ? (task.accumulatedSeconds ?? 0) * 1000 : (task.completedAt ?? 0) - task.createdAt)}
           </Text>
         )}
         <TaskReactions reactions={receivedReactions} now={now} />
@@ -884,6 +889,8 @@ export default function SessionScreen({ route, navigation }: Props) {
       createdAt: Date.now(),
       completedAt: null,
       estimatedMs,
+      accumulatedSeconds: 0,
+      timerStartedAt: null,
     };
     await addTask(newTask);
   }

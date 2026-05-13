@@ -174,7 +174,12 @@ export async function addTaskToSession(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  await memberRef.update({ tasks: [...member.tasks, task] });
+  const taskWithTimer: SessionTask = {
+    ...task,
+    accumulatedSeconds: task.accumulatedSeconds ?? 0,
+    timerStartedAt: task.timerStartedAt ?? null,
+  };
+  await memberRef.update({ tasks: [...member.tasks, taskWithTimer] });
 }
 
 export async function removeTaskFromSession(
@@ -201,9 +206,20 @@ export async function completeSessionTask(
   const doc = await memberRef.get();
   if (!doc.exists) { return; }
   const member = doc.data() as SessionMember;
-  const tasks = member.tasks.map(t =>
-    t.taskId === taskId ? { ...t, completedAt: Date.now() } : t,
-  );
+  const now = Date.now();
+  const tasks = member.tasks.map(t => {
+    if (t.taskId !== taskId) { return t; }
+    // Snapshot accumulated time before marking complete.
+    const extra = t.timerStartedAt !== null
+      ? Math.floor((now - t.timerStartedAt) / 1000)
+      : 0;
+    return {
+      ...t,
+      completedAt: now,
+      accumulatedSeconds: (t.accumulatedSeconds ?? 0) + extra,
+      timerStartedAt: null,
+    };
+  });
   const updates: Partial<SessionMember> = { tasks };
   if (member.activeTaskId === taskId) { updates.activeTaskId = null; }
   await memberRef.update(updates);
@@ -214,7 +230,29 @@ export async function setActiveTask(
   userId: string,
   taskId: string | null,
 ): Promise<void> {
-  await membersCol(sessionId).doc(userId).update({ activeTaskId: taskId });
+  const memberRef = membersCol(sessionId).doc(userId);
+  const doc = await memberRef.get();
+  if (!doc.exists) { return; }
+  const member = doc.data() as SessionMember;
+  const now = Date.now();
+  const prevActiveId = member.activeTaskId;
+
+  const tasks = member.tasks.map(t => {
+    if (t.taskId === prevActiveId && prevActiveId !== taskId) {
+      // Pause the outgoing active task.
+      const extra = t.timerStartedAt !== null
+        ? Math.floor((now - t.timerStartedAt) / 1000)
+        : 0;
+      return { ...t, accumulatedSeconds: (t.accumulatedSeconds ?? 0) + extra, timerStartedAt: null };
+    }
+    if (t.taskId === taskId && taskId !== null) {
+      // Start the incoming active task (only if not already running).
+      return { ...t, timerStartedAt: t.timerStartedAt ?? now };
+    }
+    return t;
+  });
+
+  await memberRef.update({ activeTaskId: taskId, tasks });
 }
 
 // ─── Join requests ────────────────────────────────────────────────────────────
