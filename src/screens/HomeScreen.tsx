@@ -115,6 +115,7 @@ function TogetherHistoryCard({ record, c, s, isDark }: TogetherHistoryCardProps)
   const myIncomplete = record.myTasks.filter(t => t.completedAt === null);
   const partnerNames = record.partners.map(p => p.displayName).join(', ');
   const sessionDurationMs = record.endedAt - record.startedAt;
+  const hasAnyTasks = record.myTasks.length > 0 || record.partners.some(p => p.tasks.length > 0);
 
   function formatSessionDuration(ms: number): string {
     const mins = Math.floor(ms / 60000);
@@ -127,8 +128,8 @@ function TogetherHistoryCard({ record, c, s, isDark }: TogetherHistoryCardProps)
   return (
     <TouchableOpacity
       style={s.togetherCard}
-      onPress={() => setExpanded(e => !e)}
-      activeOpacity={0.85}>
+      onPress={hasAnyTasks ? () => setExpanded(e => !e) : undefined}
+      activeOpacity={hasAnyTasks ? 0.85 : 1}>
       <View style={s.togetherCardHeader}>
         <View style={s.togetherCardLeft}>
           <View style={s.togetherCardBadge}>
@@ -254,9 +255,11 @@ function TogetherHistoryCard({ record, c, s, isDark }: TogetherHistoryCardProps)
         </View>
       )}
 
-      <Text style={[s.togetherCardChevron, { color: isDark ? c.textFaint : c.accent }]}>
-        {expanded ? '▲' : '▼'}
-      </Text>
+      {hasAnyTasks && (
+        <Text style={[s.togetherCardChevron, { color: isDark ? c.textFaint : c.accent }]}>
+          {expanded ? '▲' : '▼'}
+        </Text>
+      )}
     </TouchableOpacity>
   );
 }

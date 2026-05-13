@@ -47,8 +47,24 @@ export default function AppNavigator() {
       <Stack.Screen name="UsernameSetup" component={UsernameSetupScreen} />
       <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
-      <Stack.Screen name="TogetherLobby" component={TogetherLobbyScreen} />
-      <Stack.Screen name="Session" component={SessionScreen} />
+      <Stack.Screen
+        name="TogetherLobby"
+        component={TogetherLobbyScreen}
+        options={{
+          animation: 'fade_from_bottom',
+          animationDuration: 280,
+        }}
+      />
+      <Stack.Screen
+        name="Session"
+        component={SessionScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          animationDuration: 380,
+          gestureDirection: 'vertical',
+          gestureEnabled: true,
+        }}
+      />
     </Stack.Navigator>
   );
 }
