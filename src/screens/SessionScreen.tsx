@@ -13,6 +13,7 @@ import {
   Animated,
   ScrollView,
   Share,
+  type ViewStyle,
 } from 'react-native';
 import auth from '@react-native-firebase/auth';
 import { Screen } from '../components/ui/Screen';
@@ -94,6 +95,15 @@ const SESSION_TIME_PRESET_MS = [
 
 type S = ReturnType<typeof buildStyles>;
 
+/** Full-screen modal host (kept local so Session modals share one sheet system). */
+const MODAL_HOST_FILL: ViewStyle = {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+};
+
 // ─── Add task modal ───────────────────────────────────────────────────────────
 
 type AddTaskModalProps = {
@@ -131,67 +141,73 @@ function AddTaskModal({ visible, onClose, onAdd, atLimit, c, s }: AddTaskModalPr
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <KeyboardAvoidingView
-        style={s.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
+      <View style={MODAL_HOST_FILL}>
         <TouchableOpacity style={s.modalBackdrop} activeOpacity={1} onPress={handleClose} />
-        <View style={s.modalSheet}>
-          <View style={s.modalHandle} />
-          {atLimit ? (
-            <>
-              <Text style={[s.modalTitle, { color: c.text }]}>Task limit reached</Text>
-              <Text style={[s.modalSubtitle, { color: c.textSoft }]}>
-                You can bring up to {MAX_SESSION_TASKS} tasks into a session.
-              </Text>
-              <TouchableOpacity style={s.modalCloseBtn} onPress={handleClose}>
-                <Text style={[s.modalCloseBtnText, { color: c.text }]}>Got it</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <Text style={[s.modalTitle, { color: c.text }]}>What are you working on?</Text>
-              <TextInput
-                style={s.modalInput}
-                placeholder="e.g. Fix the login bug"
-                placeholderTextColor={c.textSoft}
-                value={text}
-                onChangeText={setText}
-                autoFocus
-                multiline
-                maxLength={120}
-                returnKeyType="done"
-                blurOnSubmit
-                onSubmitEditing={handleAdd}
-              />
-              <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it take?</Text>
-              <View style={s.estimateRow}>
-                {SESSION_TIME_PRESET_MS.map(ms => (
-                  <TouchableOpacity
-                    key={ms}
-                    style={[s.estimateChip, selectedMs === ms && s.estimateChipSelected]}
-                    onPress={() => setSelectedMs(prev => prev === ms ? null : ms)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: selectedMs === ms }}
-                    accessibilityLabel={presetSpokenLabelFromMs(ms)}>
-                    <Text style={[s.estimateChipText, selectedMs === ms && s.estimateChipTextSelected]}>
-                      {presetChipLabelFromMs(ms)}
-                    </Text>
+        <KeyboardAvoidingView
+          style={s.modalKeyboardWrap}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={0}>
+          <View style={s.modalSheetShell}>
+            <View pointerEvents="none" style={s.modalBottomBleed} />
+            <View style={s.modalSheetContent}>
+              <View style={s.modalHandle} />
+              {atLimit ? (
+                <>
+                  <Text style={[s.modalTitle, { color: c.text }]}>Task limit reached</Text>
+                  <Text style={[s.modalSubtitle, { color: c.textSoft }]}>
+                    You can bring up to {MAX_SESSION_TASKS} tasks into a session.
+                  </Text>
+                  <TouchableOpacity style={s.modalCloseBtn} onPress={handleClose}>
+                    <Text style={[s.modalCloseBtnText, { color: c.text }]}>Got it</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-              <TouchableOpacity
-                style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
-                onPress={handleAdd}
-                disabled={!text.trim() || saving}>
-                {saving
-                  ? <ActivityIndicator color={c.primaryText} />
-                  : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Add to session</Text>}
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </KeyboardAvoidingView>
+                </>
+              ) : (
+                <>
+                  <Text style={[s.modalTitle, { color: c.text }]}>What are you working on?</Text>
+                  <TextInput
+                    style={s.modalInput}
+                    placeholder="e.g. Fix the login bug"
+                    placeholderTextColor={c.textSoft}
+                    value={text}
+                    onChangeText={setText}
+                    autoFocus
+                    multiline
+                    maxLength={120}
+                    returnKeyType="done"
+                    blurOnSubmit
+                    onSubmitEditing={handleAdd}
+                  />
+                  <Text style={[s.estimateLabel, { color: c.textSoft }]}>How long will it take?</Text>
+                  <View style={s.estimateRow}>
+                    {SESSION_TIME_PRESET_MS.map(ms => (
+                      <TouchableOpacity
+                        key={ms}
+                        style={[s.estimateChip, selectedMs === ms && s.estimateChipSelected]}
+                        onPress={() => setSelectedMs(prev => prev === ms ? null : ms)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: selectedMs === ms }}
+                        accessibilityLabel={presetSpokenLabelFromMs(ms)}>
+                        <Text style={[s.estimateChipText, selectedMs === ms && s.estimateChipTextSelected]}>
+                          {presetChipLabelFromMs(ms)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <TouchableOpacity
+                    style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
+                    onPress={handleAdd}
+                    disabled={!text.trim() || saving}>
+                    {saving
+                      ? <ActivityIndicator color={c.primaryText} />
+                      : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Add to session</Text>}
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -340,43 +356,49 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
             <Modal
               visible={customModalVisible}
               transparent
-              animationType="slide"
+              animationType="fade"
               onRequestClose={() => setCustomModalVisible(false)}>
-              <KeyboardAvoidingView
-                style={s.modalOverlay}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+              <View style={MODAL_HOST_FILL}>
                 <TouchableOpacity
                   style={s.modalBackdrop}
                   activeOpacity={1}
                   onPress={() => setCustomModalVisible(false)}
                 />
-                <View style={s.modalSheet}>
-                  <View style={s.modalHandle} />
-                  <Text style={[s.modalTitle, { color: c.text }]}>Extend session</Text>
-                  <Text style={[s.modalSubtitle, { color: c.textSoft }]}>Enter minutes to add</Text>
-                  <TextInput
-                    style={s.modalInput}
-                    placeholder="e.g. 35"
-                    placeholderTextColor={c.textSoft}
-                    value={customInput}
-                    onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
-                    keyboardType="number-pad"
-                    autoFocus
-                    maxLength={4}
-                  />
-                  <TouchableOpacity
-                    style={[
-                      s.modalAddBtn,
-                      (!customInput || parseInt(customInput, 10) < 1 || busy) && s.modalAddBtnDisabled,
-                    ]}
-                    disabled={!customInput || parseInt(customInput, 10) < 1 || busy}
-                    onPress={handleCustomExtend}>
-                    {busy
-                      ? <ActivityIndicator color={c.primaryText} />
-                      : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Add time</Text>}
-                  </TouchableOpacity>
-                </View>
-              </KeyboardAvoidingView>
+                <KeyboardAvoidingView
+                  style={s.modalKeyboardWrap}
+                  behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                  keyboardVerticalOffset={0}>
+                  <View style={s.modalSheetShell}>
+                    <View pointerEvents="none" style={s.modalBottomBleed} />
+                    <View style={s.modalSheetContent}>
+                      <View style={s.modalHandle} />
+                      <Text style={[s.modalTitle, { color: c.text }]}>Extend session</Text>
+                      <Text style={[s.modalSubtitle, { color: c.textSoft }]}>Enter minutes to add</Text>
+                      <TextInput
+                        style={s.modalInput}
+                        placeholder="e.g. 35"
+                        placeholderTextColor={c.textSoft}
+                        value={customInput}
+                        onChangeText={v => setCustomInput(v.replace(/[^0-9]/g, ''))}
+                        keyboardType="number-pad"
+                        autoFocus
+                        maxLength={4}
+                      />
+                      <TouchableOpacity
+                        style={[
+                          s.modalAddBtn,
+                          (!customInput || parseInt(customInput, 10) < 1 || busy) && s.modalAddBtnDisabled,
+                        ]}
+                        disabled={!customInput || parseInt(customInput, 10) < 1 || busy}
+                        onPress={handleCustomExtend}>
+                        {busy
+                          ? <ActivityIndicator color={c.primaryText} />
+                          : <Text style={[s.modalAddBtnText, { color: c.primaryText }]}>Add time</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </KeyboardAvoidingView>
+              </View>
             </Modal>
           </>
         ) : (
@@ -1175,15 +1197,46 @@ function buildStyles(thm: AppTheme) {
     extendEndBtnText: { fontSize: 14 },
 
     // Modal
-    modalOverlay: { flex: 1, justifyContent: 'flex-end' },
     modalBackdrop: {
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+      ...MODAL_HOST_FILL,
       backgroundColor: c.backdropModal,
     },
-    modalSheet: {
-      backgroundColor: c.surfaceRaised, borderTopLeftRadius: r.xl, borderTopRightRadius: r.xl,
+    modalKeyboardWrap: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100%',
+      maxWidth: '100%',
+    },
+    modalSheetShell: {
+      position: 'relative',
+      width: '100%',
+      overflow: 'visible',
+      backgroundColor: c.surfaceRaised,
+      borderTopLeftRadius: r.xl,
+      borderTopRightRadius: r.xl,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+      borderTopWidth: 1,
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderBottomWidth: 0,
+      borderColor: c.border,
+    },
+    modalBottomBleed: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: -120,
+      height: 140,
+      backgroundColor: c.surfaceRaised,
+    },
+    modalSheetContent: {
+      position: 'relative',
+      zIndex: 1,
       paddingHorizontal: sp.xl, paddingBottom: Platform.OS === 'ios' ? 40 : 28,
-      paddingTop: sp.lg, borderWidth: 1, borderColor: c.border,
+      paddingTop: sp.lg,
     },
     modalHandle: {
       width: 36, height: sp.xs, backgroundColor: c.borderStrong,

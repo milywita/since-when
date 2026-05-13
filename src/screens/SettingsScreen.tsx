@@ -22,7 +22,11 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
 import type { AppScreenProps } from '../navigation/types';
-import type { ReminderPreset, SarcasmLevel } from '../types/settingsPreferences';
+import {
+  SETTINGS_DEFAULTS,
+  type ReminderPreset,
+  type SarcasmLevel,
+} from '../types/settingsPreferences';
 
 type Props = AppScreenProps<'Settings'>;
 
@@ -77,8 +81,8 @@ export default function SettingsScreen({ navigation }: Props) {
   const [importantTaskReminders, setImportantTaskReminders] = useState(true);
   const [partnerReactions, setPartnerReactions] = useState(true);
 
-  const [sarcasmLevel, setSarcasmLevel] = useState<SarcasmLevel>('sarcastic');
-  const [reminderPreset, setReminderPreset] = useState<ReminderPreset>('silent');
+  const [sarcasmLevel, setSarcasmLevel] = useState<SarcasmLevel>(SETTINGS_DEFAULTS.sarcasmLevel);
+  const [reminderPreset, setReminderPreset] = useState<ReminderPreset>(SETTINGS_DEFAULTS.reminderPreset);
 
   const [manualTimerStart, setManualTimerStart] = useState(false);
   const [askBeforeOverdue, setAskBeforeOverdue] = useState(true);
@@ -87,7 +91,9 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const [allowPartnerReactions, setAllowPartnerReactions] = useState(true);
   const [allowPartnerNudges, setAllowPartnerNudges] = useState(true);
-  const [showActiveTaskToPartner, setShowActiveTaskToPartner] = useState(true);
+  const [showActiveTaskToPartner, setShowActiveTaskToPartner] = useState(
+    SETTINGS_DEFAULTS.togetherVisibility === 'visible',
+  );
   const [showOverdueToPartner, setShowOverdueToPartner] = useState(true);
   const [appBackupNudges, setAppBackupNudges] = useState(false);
 

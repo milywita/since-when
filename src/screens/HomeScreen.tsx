@@ -34,6 +34,11 @@ import { getSessionOnce } from '../services/sessionService';
 import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
 import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
 import { presetChipLabelFromMs, presetSpokenLabelFromMs } from '../utils/taskEstimatePresetLabel';
+import {
+  SETTINGS_DEFAULTS,
+  type ReminderPreset,
+  type TogetherVisibility,
+} from '../types/settingsPreferences';
 
 /** Full-screen modal host: same layout as `StyleSheet.absoluteFillObject` (RN typings often omit that alias). */
 const MODAL_HOST_FILL: ViewStyle = {
@@ -349,22 +354,84 @@ type AddTaskModalProps = {
   s: S;
 };
 
+const REMINDER_PRESET_OPTIONS: { id: ReminderPreset; label: string }[] = [
+  { id: 'silent', label: 'Silent' },
+  { id: 'normal', label: 'Normal' },
+  { id: 'annoyMe', label: 'Annoy Me' },
+  { id: 'partnerOnly', label: 'Partner Only' },
+];
+
+const TOGETHER_VISIBILITY_OPTIONS: { id: TogetherVisibility; label: string }[] = [
+  { id: 'visible', label: 'Visible in Together' },
+  { id: 'hidden', label: 'Hidden in Together' },
+];
+
+function VisibilityEyeIcon({ color, crossed }: { color: string; crossed: boolean }) {
+  return (
+    <View style={visibilityIconStyles.wrap}>
+      <View style={[visibilityIconStyles.eyeOutline, { borderColor: color }]} />
+      <View style={[visibilityIconStyles.pupil, { backgroundColor: color }]} />
+      {crossed ? (
+        <View
+          style={[
+            visibilityIconStyles.crossLine,
+            { backgroundColor: color, transform: [{ rotate: '-28deg' }] },
+          ]}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function stashAdvancedDraftForLater(draft: {
+  reminderPreset: ReminderPreset;
+  reminderPresetOverride: ReminderPreset | null;
+  togetherVisibility: TogetherVisibility;
+  togetherVisibilityOverride: TogetherVisibility | null;
+}) {
+  // TODO: Persist advanced task draft fields with task creation payload once task schema/backing service are ready.
+  // TODO: Keep this centralized so task creation and edit flows share the same override mapping behavior.
+  // TODO: Add taskType/category field later for database, statistics, and task-type-based reminder behavior.
+  return draft;
+}
+
 function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskModalProps) {
   const insets = useSafeAreaInsets();
   const { spacing: sp } = useTheme();
   const [text, setText] = useState('');
   const [selectedMs, setSelectedMs] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [reminderPresetOverride, setReminderPresetOverride] = useState<ReminderPreset | null>(null);
+  const [togetherVisibilityOverride, setTogetherVisibilityOverride] = useState<TogetherVisibility | null>(null);
   const contentPadBottom = sp.lg + insets.bottom;
+  const selectedReminderPreset = reminderPresetOverride ?? SETTINGS_DEFAULTS.reminderPreset;
+  const selectedTogetherVisibility = togetherVisibilityOverride ?? SETTINGS_DEFAULTS.togetherVisibility;
+
+  function resetDraft() {
+    setText('');
+    setSelectedMs(null);
+    setAdvancedOpen(false);
+    setReminderPresetOverride(null);
+    setTogetherVisibilityOverride(null);
+  }
 
   async function handleAdd() {
     const trimmed = text.trim();
     if (!trimmed) { return; }
+    const taskCreationAdvancedDraft = {
+      reminderPreset: selectedReminderPreset,
+      reminderPresetOverride,
+      togetherVisibility: selectedTogetherVisibility,
+      togetherVisibilityOverride,
+    };
+    stashAdvancedDraftForLater(taskCreationAdvancedDraft);
+    // TODO: Use `taskCreationAdvancedDraft.reminderPreset` to drive per-task reminder scheduling when notifications ship.
+    // TODO: Enforce `taskCreationAdvancedDraft.togetherVisibility` in Together mode permissions/filtering once backend support is added.
     setSaving(true);
     try {
       await onAdd(trimmed, selectedMs);
-      setText('');
-      setSelectedMs(null);
+      resetDraft();
       onClose();
     } finally {
       setSaving(false);
@@ -372,8 +439,7 @@ function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskMod
   }
 
   function handleClose() {
-    setText('');
-    setSelectedMs(null);
+    resetDraft();
     onClose();
   }
 
@@ -422,6 +488,63 @@ function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskMod
               </View>
 
               <TouchableOpacity
+                style={s.advancedToggleRow}
+                onPress={() => setAdvancedOpen(prev => !prev)}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: advancedOpen }}>
+                <Text style={[s.advancedToggleLabel, { color: c.textSoft }]}>Advanced options</Text>
+                <Text style={[s.advancedToggleChevron, { color: c.textDim }]}>
+                  {advancedOpen ? '▲' : '▼'}
+                </Text>
+              </TouchableOpacity>
+
+              {advancedOpen && (
+                <View style={s.advancedCard}>
+                  <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Reminder preset</Text>
+                  <View style={s.advancedChipRow}>
+                    {REMINDER_PRESET_OPTIONS.map(opt => (
+                      <TouchableOpacity
+                        key={opt.id}
+                        style={[s.advancedChip, selectedReminderPreset === opt.id && s.advancedChipSelected]}
+                        onPress={() => setReminderPresetOverride(opt.id)}>
+                        <Text
+                          style={[
+                            s.advancedChipText,
+                            { color: selectedReminderPreset === opt.id ? c.primaryText : c.textMuted },
+                          ]}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={[s.advancedGroupTitle, { color: c.textSoft }]}>Together Mode visibility</Text>
+                  <View style={s.advancedChipRow}>
+                    {TOGETHER_VISIBILITY_OPTIONS.map(opt => (
+                      <TouchableOpacity
+                        key={opt.id}
+                        style={[s.advancedChip, selectedTogetherVisibility === opt.id && s.advancedChipSelected]}
+                        onPress={() => setTogetherVisibilityOverride(opt.id)}>
+                        <View style={s.advancedChipContent}>
+                          <VisibilityEyeIcon
+                            color={selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted}
+                            crossed={opt.id === 'hidden'}
+                          />
+                          <Text
+                            style={[
+                              s.advancedChipText,
+                              { color: selectedTogetherVisibility === opt.id ? c.primaryText : c.textMuted },
+                            ]}>
+                            {opt.label}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              <TouchableOpacity
                 style={[s.modalAddBtn, !text.trim() && s.modalAddBtnDisabled]}
                 onPress={handleAdd}
                 disabled={!text.trim() || saving}>
@@ -432,6 +555,7 @@ function AddTaskModal({ visible, onClose, onAdd, timePresets, c, s }: AddTaskMod
             </View>
           </View>
         </KeyboardAvoidingView>
+
       </View>
     </Modal>
   );
@@ -930,6 +1054,33 @@ const themeIconStyles = StyleSheet.create({
   },
 });
 
+const visibilityIconStyles = StyleSheet.create({
+  wrap: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eyeOutline: {
+    position: 'absolute',
+    width: 12,
+    height: 8,
+    borderWidth: 1.4,
+    borderRadius: 6,
+  },
+  pupil: {
+    width: 3.5,
+    height: 3.5,
+    borderRadius: 1.75,
+  },
+  crossLine: {
+    position: 'absolute',
+    width: 14,
+    height: 1.5,
+    borderRadius: 1,
+  },
+});
+
 // ─── Style factory ────────────────────────────────────────────────────────────
 
 function buildStyles(thm: AppTheme, isDark: boolean) {
@@ -1121,6 +1272,44 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     presetChipSelected: { backgroundColor: c.primary, borderColor: c.primary },
     presetChipText: { color: c.textMuted, fontSize: 13, fontWeight: '500' },
     presetChipTextSelected: { color: c.primaryText },
+    advancedToggleRow: {
+      marginTop: 2,
+      marginBottom: sp.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    advancedToggleLabel: { fontSize: 13, fontWeight: '600' },
+    advancedToggleChevron: { fontSize: 11, fontWeight: '700' },
+    advancedCard: {
+      marginBottom: sp.md,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      paddingHorizontal: sp.md,
+      paddingVertical: sp.md,
+      gap: sp.xs,
+    },
+    advancedGroupTitle: { marginTop: sp.xs, marginBottom: 6, fontSize: 12, fontWeight: '600' },
+    advancedChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: sp.xs, marginBottom: 8 },
+    advancedChip: {
+      borderRadius: sp.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      backgroundColor: c.surfaceRaised,
+    },
+    advancedChipSelected: { backgroundColor: c.primary, borderColor: c.primary },
+    advancedChipContent: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    advancedChipText: { fontSize: 12, fontWeight: '500' },
     modalAddBtn: { backgroundColor: c.primary, borderRadius: r.sm, paddingVertical: 15, alignItems: 'center' },
     modalAddBtnDisabled: { opacity: 0.3 },
     modalAddBtnText: { fontSize: 16, fontWeight: '600' },
