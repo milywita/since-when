@@ -21,13 +21,16 @@ export function PartnerCard({
   onReact,
 }: PartnerCardProps) {
   const { colors: c, spacing: sp, radius: r } = useTheme();
-  // #1 active task is the focused task (activeTaskId is kept in sync with position 1).
-  const activeTask = member.tasks.find(
-    t => t.taskId === member.activeTaskId && !t.completedAt,
-  );
+  // The focus task is always position #1 among active tasks.
+  const focusTask = member.tasks.find(t => t.position === 1 && t.completedAt === null);
   const otherTasks = member.tasks
-    .filter(t => t.taskId !== member.activeTaskId)
-    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+    .filter(t => t.taskId !== focusTask?.taskId)
+    .sort((a, b) => {
+      const aActive = a.completedAt === null;
+      const bActive = b.completedAt === null;
+      if (aActive !== bActive) { return aActive ? -1 : 1; }
+      return (a.position ?? 0) - (b.position ?? 0);
+    });
 
   return (
     <View
@@ -52,12 +55,12 @@ export function PartnerCard({
         <Text style={[styles.partnerEmpty, { color: c.textFaint }]}>No tasks added yet.</Text>
       )}
 
-      {activeTask && (() => {
-        const activeLiveSecs = activeTask.timerStartedAt !== null
-          ? Math.max(0, Math.floor((now - activeTask.timerStartedAt) / 1000))
+      {focusTask && (() => {
+        const focusLiveSecs = focusTask.timerStartedAt !== null
+          ? Math.max(0, Math.floor((now - focusTask.timerStartedAt) / 1000))
           : 0;
-        const activeFocusMs = ((activeTask.accumulatedSeconds ?? 0) + activeLiveSecs) * 1000;
-        const activeOver = activeTask.estimatedMs != null && activeFocusMs > activeTask.estimatedMs;
+        const focusFocusMs = ((focusTask.accumulatedSeconds ?? 0) + focusLiveSecs) * 1000;
+        const focusOver = focusTask.estimatedMs != null && focusFocusMs > focusTask.estimatedMs;
         return (
           <View
             style={[
@@ -75,30 +78,30 @@ export function PartnerCard({
               <Text style={[styles.partnerFocusLabel, { color: c.accent }]}>FOCUS</Text>
             </View>
             <Text style={[styles.partnerFocusTitle, { color: c.text }]} numberOfLines={2}>
-              {activeTask.title}
+              {focusTask.title}
             </Text>
             <View style={styles.partnerFocusMeta}>
               <Text
                 style={[
                   styles.partnerFocusTimer,
-                  { color: activeFocusMs > 86400 * 1000 ? c.dangerMuted : c.accent },
+                  { color: focusFocusMs > 86400 * 1000 ? c.dangerMuted : c.accent },
                 ]}>
-                {formatElapsed(activeFocusMs)}
+                {formatElapsed(focusFocusMs)}
               </Text>
-              {activeTask.estimatedMs != null && (
-                <Text style={[styles.partnerEstimate, { color: activeOver ? c.danger : c.textMuted }]}>
-                  {activeOver
-                    ? `over by ${formatElapsed(activeFocusMs - activeTask.estimatedMs)}`
-                    : `est. ${formatElapsed(activeTask.estimatedMs)}`}
+              {focusTask.estimatedMs != null && (
+                <Text style={[styles.partnerEstimate, { color: focusOver ? c.danger : c.textMuted }]}>
+                  {focusOver
+                    ? `over by ${formatElapsed(focusFocusMs - focusTask.estimatedMs)}`
+                    : `est. ${formatElapsed(focusTask.estimatedMs)}`}
                 </Text>
               )}
               <ReactionButton
                 variant="focus"
-                onPress={() => onReact(activeTask.taskId, false)}
+                onPress={() => onReact(focusTask.taskId, false)}
               />
             </View>
             <TaskReactions
-              reactions={recentReactions.filter(rx => rx.taskId === activeTask.taskId)}
+              reactions={recentReactions.filter(rx => rx.taskId === focusTask.taskId)}
               now={now}
             />
           </View>

@@ -36,12 +36,15 @@ export async function createSession(
     participantIds: [userId],
   };
   await ref.set(session);
+  const firstActiveTask = initialTasks
+    .filter(t => t.completedAt === null)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
   await membersCol(ref.id).doc(userId).set({
     userId,
     displayName,
     joinedAt: now,
     tasks: initialTasks,
-    activeTaskId: null,
+    activeTaskId: firstActiveTask?.taskId ?? null,
   } as SessionMember);
   await setActiveSession(userId, ref.id);
   return ref.id;
@@ -430,12 +433,15 @@ export async function completeJoin(
   request: JoinRequest,
 ): Promise<void> {
   const now = Date.now();
+  const firstActiveTask = request.tasks
+    .filter(t => t.completedAt === null)
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
   await membersCol(sessionId).doc(request.userId).set({
     userId: request.userId,
     displayName: request.displayName,
     joinedAt: now,
     tasks: request.tasks,
-    activeTaskId: null,
+    activeTaskId: firstActiveTask?.taskId ?? null,
   } as SessionMember);
   await setActiveSession(request.userId, sessionId);
 
