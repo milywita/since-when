@@ -38,23 +38,63 @@ export function useSession(sessionId: string) {
   useEffect(() => {
     if (!sessionId) { return; }
     let resolved = 0;
+    let alive = true;
     const onResolved = () => { if (++resolved >= 2) { setLoading(false); } };
 
-    const unsubSession = subscribeToSession(
-      sessionId,
-      s => { setSession(s); setError(null); onResolved(); },
-      e => { setError(e.message); onResolved(); },
-    );
-    const unsubMembers = subscribeToMembers(
-      sessionId,
-      m => { setMembers(m); onResolved(); },
-      e => { setError(e.message); onResolved(); },
-    );
-    const unsubReactions = subscribeToReactions(
-      sessionId,
-      r => setReactions(r),
-    );
-    return () => { unsubSession(); unsubMembers(); unsubReactions(); };
+    // Resubscribe helpers — Firestore terminates onSnapshot on error, so we restart.
+    let unsubSession: () => void;
+    let unsubMembers: () => void;
+    let unsubReactions: () => void;
+
+    const subscribeSession = () => {
+      unsubSession = subscribeToSession(
+        sessionId,
+        s => { if (alive) { setSession(s); setError(null); onResolved(); } },
+        e => {
+          if (!alive) { return; }
+          setError(e.message);
+          onResolved();
+          // Retry after a short delay so transient errors self-heal.
+          setTimeout(() => { if (alive) { subscribeSession(); } }, 3000);
+        },
+      );
+    };
+
+    const subscribeAllMembers = () => {
+      unsubMembers = subscribeToMembers(
+        sessionId,
+        m => { if (alive) { setMembers(m); onResolved(); } },
+        e => {
+          if (!alive) { return; }
+          console.warn('[useSession] members subscription error, retrying:', e.message);
+          onResolved();
+          setTimeout(() => { if (alive) { subscribeAllMembers(); } }, 3000);
+        },
+      );
+    };
+
+    const subscribeAllReactions = () => {
+      unsubReactions = subscribeToReactions(
+        sessionId,
+        r => { if (alive) { setReactions(r); } },
+        e => {
+          if (!alive) { return; }
+          console.warn('[useSession] reactions subscription error, retrying:', e.message);
+          setTimeout(() => { if (alive) { subscribeAllReactions(); } }, 3000);
+        },
+      );
+    };
+
+    subscribeSession();
+    subscribeAllMembers();
+    subscribeAllReactions();
+
+    return () => {
+      alive = false;
+      unsubSession?.();
+      unsubMembers?.();
+      unsubReactions?.();
+    };
   }, [sessionId]);
 
   const myMember = members.find(m => m.userId === userId) ?? null;

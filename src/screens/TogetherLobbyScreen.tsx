@@ -27,7 +27,6 @@ import { formatElapsed } from '../utils/formatElapsed';
 import {
   createSession,
   findActiveSessionByInviteCode,
-  addTaskToSession,
   requestToJoin,
   completeJoin,
   subscribeToJoinRequest,
@@ -44,7 +43,7 @@ import type { AppScreenProps } from '../navigation/types';
 type Props = AppScreenProps<'TogetherLobby'>;
 
 type Mode = 'pick' | 'task-selection' | 'waiting-approval';
-type PendingCreate = { kind: 'create'; sessionId: string; durationMs: number };
+type PendingCreate = { kind: 'create'; durationMs: number };
 type PendingJoin   = { kind: 'join';   sessionId: string; durationMs: number; hostUsername: string };
 type Pending = PendingCreate | PendingJoin;
 
@@ -317,12 +316,9 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
   async function handleHost() {
     setLoading(true);
     try {
-      const sessionId = await createSession(user.uid, displayName, selectedDurationMs, []);
-      setPending({ kind: 'create', sessionId, durationMs: selectedDurationMs });
+      setPending({ kind: 'create', durationMs: selectedDurationMs });
       setSelectedTaskIds(new Set());
       setMode('task-selection');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not create session.');
     } finally {
       setLoading(false);
     }
@@ -396,10 +392,9 @@ export default function TogetherLobbyScreen({ navigation }: Props) {
       }
 
       if (pending.kind === 'create') {
-        for (const task of tasks) {
-          await addTaskToSession(pending.sessionId, user.uid, task);
-        }
-        navigation.replace('Session', { sessionId: pending.sessionId });
+        // Create session with all tasks at once — no orphaned session if user backs out earlier.
+        const sessionId = await createSession(user.uid, displayName, pending.durationMs, tasks);
+        navigation.replace('Session', { sessionId });
       } else {
         const reqId = await requestToJoin(pending.sessionId, user.uid, displayName, tasks);
         setJoinRequestId(reqId);
