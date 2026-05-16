@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Modal from 'react-native-modal';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme, useThemeToggle } from '../../theme/ThemeContext';
 import { useActivityCenter, type ActivityItem } from '../../context/ActivityCenterContext';
 
@@ -41,8 +41,9 @@ function ActivityRow({ item, isUnread }: RowProps) {
         <Text style={[rowStyles.from, { color: c.text }]} numberOfLines={1}>
           {item.fromDisplayName}
         </Text>
+        {/* message is the current field; fall back to legacy `text` for old persisted items */}
         <Text style={[rowStyles.reaction, { color: c.accent }]} numberOfLines={2}>
-          "{item.text}"
+          "{item.message ?? (item as any).text ?? ''}"
         </Text>
         <Text style={[rowStyles.task, { color: c.textSoft }]} numberOfLines={1}>
           on "{item.taskTitle}"
@@ -86,7 +87,6 @@ type Props = {
 export function ActivityCenterModal({ visible, onClose }: Props) {
   const { colors: c, spacing: sp, radius: r } = useTheme();
   const { isDark } = useThemeToggle();
-  const insets = useSafeAreaInsets();
   const { items, unreadCount, markAllRead } = useActivityCenter();
 
   function handleOpen() {
@@ -123,6 +123,14 @@ export function ActivityCenterModal({ visible, onClose }: Props) {
       hideModalContentWhileAnimating
       statusBarTranslucent
       style={modalStyles.root}>
+      {/*
+        The sheet uses SafeAreaView (from react-native-safe-area-context) rather than
+        manual paddingTop/paddingBottom from useSafeAreaInsets. SafeAreaView is more
+        reliable inside react-native-modal on physical Android devices with notches/cutouts
+        because it reads directly from the native inset measurements regardless of how
+        the modal overlay is positioned. The `edges` prop limits inset application to
+        top and bottom only (left/right are handled by the drawer width itself).
+      */}
       <View
         style={[
           modalStyles.sheet,
@@ -130,72 +138,71 @@ export function ActivityCenterModal({ visible, onClose }: Props) {
             backgroundColor: c.surfaceRaised,
             borderLeftColor: c.border,
             borderLeftWidth: 1,
-            // Ensure content sits below status bar and above home indicator
-            paddingTop: insets.top,
-            paddingBottom: insets.bottom,
           },
         ]}>
+        <SafeAreaView style={modalStyles.safeArea} edges={['top', 'bottom']}>
 
-        {/* ── Header ──────────────────────────────────────────────── */}
-        <View
-          style={[
-            modalStyles.header,
-            {
-              borderBottomColor: c.border,
-              paddingHorizontal: sp.lg,
-              paddingVertical: 14,
-              backgroundColor: c.surfaceRaised,
-            },
-          ]}>
-          <Text style={[modalStyles.title, { color: c.text }]}>Activity</Text>
-          {unreadCount > 0 && (
-            <View style={[modalStyles.badge, { backgroundColor: c.accent, borderRadius: r.pill }]}>
-              <Text style={modalStyles.badgeText}>
-                {unreadCount > 9 ? '9+' : String(unreadCount)}
+          {/* ── Header ──────────────────────────────────────────────── */}
+          <View
+            style={[
+              modalStyles.header,
+              {
+                borderBottomColor: c.border,
+                paddingHorizontal: sp.lg,
+                paddingVertical: 14,
+                backgroundColor: c.surfaceRaised,
+              },
+            ]}>
+            <Text style={[modalStyles.title, { color: c.text }]}>Activity</Text>
+            {unreadCount > 0 && (
+              <View style={[modalStyles.badge, { backgroundColor: c.accent, borderRadius: r.pill }]}>
+                <Text style={modalStyles.badgeText}>
+                  {unreadCount > 9 ? '9+' : String(unreadCount)}
+                </Text>
+              </View>
+            )}
+            {/* Large, clearly tappable close button */}
+            <Pressable
+              onPress={onClose}
+              hitSlop={16}
+              style={[
+                modalStyles.closeBtn,
+                { backgroundColor: c.surface, borderColor: c.border, borderRadius: r.pill },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Close activity center">
+              <Text style={[modalStyles.closeX, { color: c.text }]}>✕</Text>
+            </Pressable>
+          </View>
+
+          {/* ── Swipe hint ──────────────────────────────────────────── */}
+          <View style={modalStyles.swipeHint}>
+            <View style={[modalStyles.swipeHandle, { backgroundColor: c.borderStrong }]} />
+          </View>
+
+          {/* ── Item list / empty state ──────────────────────────── */}
+          {items.length === 0 ? (
+            <View style={[modalStyles.empty, { paddingHorizontal: sp.xl }]}>
+              <Text style={[modalStyles.emptyTitle, { color: c.text }]}>Nothing here yet.</Text>
+              <Text style={[modalStyles.emptyBody, { color: c.textSoft }]}>
+                Partner reactions and nudges from Together sessions will appear here.
               </Text>
             </View>
+          ) : (
+            <ScrollView
+              style={modalStyles.list}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={modalStyles.listContent}>
+              {items.map(item => (
+                <ActivityRow
+                  key={item.id}
+                  item={item}
+                  isUnread={item.sentAt >= unreadBoundaryAt && unreadBoundaryAt > 0}
+                />
+              ))}
+            </ScrollView>
           )}
-          {/* Large, clearly tappable close button */}
-          <Pressable
-            onPress={onClose}
-            hitSlop={16}
-            style={[
-              modalStyles.closeBtn,
-              { backgroundColor: c.surface, borderColor: c.border, borderRadius: r.pill },
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel="Close activity center">
-            <Text style={[modalStyles.closeX, { color: c.text }]}>✕</Text>
-          </Pressable>
-        </View>
-
-        {/* ── Swipe hint ──────────────────────────────────────────── */}
-        <View style={modalStyles.swipeHint}>
-          <View style={[modalStyles.swipeHandle, { backgroundColor: c.borderStrong }]} />
-        </View>
-
-        {/* ── Item list / empty state ──────────────────────────── */}
-        {items.length === 0 ? (
-          <View style={[modalStyles.empty, { paddingHorizontal: sp.xl }]}>
-            <Text style={[modalStyles.emptyTitle, { color: c.text }]}>Nothing here yet.</Text>
-            <Text style={[modalStyles.emptyBody, { color: c.textSoft }]}>
-              Partner reactions and nudges from Together sessions will appear here.
-            </Text>
-          </View>
-        ) : (
-          <ScrollView
-            style={modalStyles.list}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={modalStyles.listContent}>
-            {items.map(item => (
-              <ActivityRow
-                key={item.id}
-                item={item}
-                isUnread={item.sentAt >= unreadBoundaryAt && unreadBoundaryAt > 0}
-              />
-            ))}
-          </ScrollView>
-        )}
+        </SafeAreaView>
       </View>
     </Modal>
   );
@@ -212,6 +219,11 @@ const modalStyles = StyleSheet.create({
   sheet: {
     width: '82%',
     maxWidth: 340,
+    flex: 1,
+  },
+  // SafeAreaView inside the sheet so insets are applied relative to the modal overlay,
+  // not the root window — prevents double-application on non-notched devices.
+  safeArea: {
     flex: 1,
   },
   header: {

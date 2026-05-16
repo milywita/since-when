@@ -28,6 +28,10 @@ import type { AppScreenProps } from '../navigation/types';
 import { formatElapsed } from '../utils/formatElapsed';
 import { subscribeToUserProfile, setActiveSession } from '../services/userService';
 import { getSessionOnce } from '../services/sessionService';
+import {
+  requestNotificationPermissions,
+  ensureNotificationChannel,
+} from '../services/notificationService';
 import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
 import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
 import { TimerEstimateBlock } from '../components/tasks/TimerEstimateBlock';
@@ -36,6 +40,7 @@ import { FancyReminderModal } from '../components/reminders/FancyReminderModal';
 import { useSoloReminderEngine } from '../hooks/useSoloReminderEngine';
 import { useUserSettings } from '../context/UserSettingsContext';
 import { ActivityCenterIcon } from '../components/layout/ActivityCenterIcon';
+import { useActivityCenter } from '../context/ActivityCenterContext';
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -606,6 +611,12 @@ export default function HomeScreen({ navigation }: Props) {
 
   const isFocused = useIsFocused();
   const { settings: userSettings, ready: settingsReady } = useUserSettings();
+  const { items: activityItems } = useActivityCenter();
+
+  // Most-recent partner reaction timestamp — tells the solo engine to back off
+  // when partner activity was recent (partner-priority rule).
+  const lastPartnerReactionAt = activityItems[0]?.sentAt;
+
   const reminder = useSoloReminderEngine({
     activeTasks,
     // Gate on settingsReady so the engine never fires with the stale default tone
@@ -615,9 +626,35 @@ export default function HomeScreen({ navigation }: Props) {
     globalReminderPreset: userSettings.reminderPreset,
     // Suppress pop-ups while any blocking sheet (add/edit) or action sheet is open
     suppressPopups: modalVisible || editingTask !== null || actionSheetTask !== null,
+    // If partner reacted recently, engine skips its cycle (partner > solo priority)
+    lastPartnerReactionAt,
   });
+
+  // Partner-priority: if a new activity item arrives while a solo reminder is visible,
+  // dismiss the solo popup so partner feedback takes centre stage.
+  const prevActivityCountRef = useRef(0);
+  useEffect(() => {
+    const count = activityItems.length;
+    if (count > prevActivityCountRef.current && reminder.visible) {
+      reminder.dismiss();
+    }
+    prevActivityCountRef.current = count;
+  }, [activityItems, reminder]);
   const now = useNow();
   const [rejoinSessionId, setRejoinSessionId] = useState<string | null>(null);
+
+  // Request OS notification permission early (on home screen, after auth) so Android 13+
+  // devices show the POST_NOTIFICATIONS system dialog before the user enters a session.
+  // Channels are created here so they exist before any notification is ever displayed.
+  useEffect(() => {
+    let alive = true;
+    requestNotificationPermissions()
+      .then(granted => {
+        if (granted && alive) { return ensureNotificationChannel(); }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     const uid = auth().currentUser?.uid;

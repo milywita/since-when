@@ -17,14 +17,27 @@ const MAX_ITEMS = 10;
 
 /** One entry in the persistent activity feed (partner reactions/nudges). */
 export type ActivityItem = {
-  /** Stable ID: `sessionId:sentAt:text` — prevents duplicate insertions. */
+  /**
+   * Stable ID: `sessionId:sentAt:message` — prevents duplicate insertions.
+   * Old items (pre-migration) used `:text` suffix instead; both are unique.
+   */
   id: string;
   type: 'reaction';
+  /** Firestore userId of the person who sent the reaction. */
+  fromUserId?: string;
   fromDisplayName: string;
+  /** The taskId the reaction was sent for. */
+  taskId?: string;
   taskTitle: string;
-  text: string;
+  /** The reaction text (e.g. "Killing it!"). Replaces the old `text` field. */
+  message: string;
+  /** Unix ms when the reaction was created (same value as sentAt). */
+  createdAt: number;
+  /** Legacy alias for createdAt — kept for ID deduplication across storage versions. */
   sentAt: number;
   sessionId: string;
+  /** Unix ms when the user read this item, or null/undefined if unread. */
+  readAt?: number | null;
 };
 
 type PersistedData = {
@@ -93,7 +106,8 @@ export function ActivityCenterProvider({ children }: { children: ReactNode }) {
 
   const addActivity = useCallback(
     (raw: Omit<ActivityItem, 'id'>) => {
-      const id = `${raw.sessionId}:${raw.sentAt}:${raw.text}`;
+      // Use message for the stable ID (message === reaction text, same as old `text`)
+      const id = `${raw.sessionId}:${raw.sentAt}:${raw.message}`;
       if (seenIdsRef.current.has(id)) {
         return;
       }

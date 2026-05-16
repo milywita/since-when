@@ -33,9 +33,16 @@ export const COOLDOWN_DELAY_MS = 5 * 60 * 1000;
 
 /** Returns the max daily reminder count for a given effective task preset. */
 export function getMaxDailyPerTask(preset: ReminderPreset): number {
-  if (preset === 'annoyMe') { return 6; }
+  if (preset === 'annoyMe') { return 9; }
   return 4; // normal (and safe fallback)
 }
+
+/**
+ * If a partner reaction was received within this window (ms), the solo reminder
+ * engine will skip its cycle so partner activity takes priority.
+ * Applies only when `lastPartnerReactionAt` is passed to `useSoloReminderEngine`.
+ */
+export const PARTNER_REACTION_SOLO_COOLDOWN_MS = 8 * 60 * 1000;
 
 // ─── Preset modifiers ─────────────────────────────────────────────────────────
 // Multipliers applied to per-task focused thresholds and unfocused intervals.
@@ -58,10 +65,11 @@ export const PRESET_MODIFIERS: Record<
     notStartedIntervalMult: 1.0,
   },
   annoyMe: {
-    // Reminds at 75% of the normal focus threshold → fires sooner
-    focusThresholdMult: 0.75,
-    // Reminds after 60% of the normal not-started interval → more frequent
-    notStartedIntervalMult: 0.6,
+    // Reminds at 50% of the normal focus threshold → fires noticeably sooner
+    // (e.g. 1-hour task gets a nudge at 30 min instead of 60 min)
+    focusThresholdMult: 0.5,
+    // Reminds after 40% of the normal not-started interval → much more frequent
+    notStartedIntervalMult: 0.4,
   },
 };
 

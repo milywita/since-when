@@ -19,6 +19,7 @@ import {
   POPUP_AUTO_DISMISS_COMPLETION_MS,
   RECENT_MESSAGE_HISTORY,
   COOLDOWN_DELAY_MS,
+  PARTNER_REACTION_SOLO_COOLDOWN_MS,
   PRESET_MODIFIERS,
   isSilentPreset,
   getMaxDailyPerTask,
@@ -89,8 +90,14 @@ export function useSoloReminderEngine(options: {
    * task edit sheet) to avoid stacking reminders on top of critical UI.
    */
   suppressPopups?: boolean;
+  /**
+   * Unix-ms timestamp of the most recent partner reaction from ActivityCenter.
+   * When provided and within PARTNER_REACTION_SOLO_COOLDOWN_MS, the engine
+   * skips its reminder cycle so partner activity takes priority over solo nudges.
+   */
+  lastPartnerReactionAt?: number;
 }): SoloReminderEngine {
-  const { activeTasks, enabled, tone, globalReminderPreset, suppressPopups = false } = options;
+  const { activeTasks, enabled, tone, globalReminderPreset, suppressPopups = false, lastPartnerReactionAt } = options;
 
   const [visible, setVisible] = useState(false);
   const [emoji, setEmoji] = useState('🔥');
@@ -123,6 +130,10 @@ export function useSoloReminderEngine(options: {
   useEffect(() => { globalPresetRef.current = globalReminderPreset; }, [globalReminderPreset]);
   const suppressPopupsRef = useRef(suppressPopups);
   useEffect(() => { suppressPopupsRef.current = suppressPopups; }, [suppressPopups]);
+
+  // Stable ref so the interval callback always reads the latest partner reaction time.
+  const lastPartnerReactionAtRef = useRef(lastPartnerReactionAt);
+  useEffect(() => { lastPartnerReactionAtRef.current = lastPartnerReactionAt; }, [lastPartnerReactionAt]);
 
   const autoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -202,6 +213,13 @@ export function useSoloReminderEngine(options: {
     // Skip entirely if disabled, not yet loaded, a pop-up is already showing,
     // or a blocking UI (time's up, form sheet) is suppressing pop-ups.
     if (!enabled || !loadedRef.current || visibleRef.current || suppressPopupsRef.current) {
+      return;
+    }
+
+    // Partner-priority: if the partner reacted recently, skip this cycle entirely
+    // so partner activity takes precedence over solo reminder nudges.
+    const lastReaction = lastPartnerReactionAtRef.current;
+    if (lastReaction !== undefined && Date.now() - lastReaction < PARTNER_REACTION_SOLO_COOLDOWN_MS) {
       return;
     }
 

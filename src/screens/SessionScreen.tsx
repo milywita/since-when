@@ -13,6 +13,8 @@ import {
   Animated,
   ScrollView,
   Share,
+  Vibration,
+  AppState,
 } from 'react-native';
 import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from 'react-native-draggable-flatlist';
 import auth from '@react-native-firebase/auth';
@@ -56,6 +58,7 @@ import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
 import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
 import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
 import { TimerEstimateBlock } from '../components/tasks/TimerEstimateBlock';
+import { PartnerReactionModal } from '../components/session/PartnerReactionModal';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -681,6 +684,13 @@ export default function SessionScreen({ route, navigation }: Props) {
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
+
+  // State for the fancy partner reaction popup (replaces the old flash banner for reactions)
+  const [partnerReactionModal, setPartnerReactionModal] = useState<{
+    fromDisplayName: string;
+    taskTitle: string;
+    message: string;
+  } | null>(null);
   const [editingSessionTask, setEditingSessionTask] = useState<SessionTask | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionSheetTask, setActionSheetTask] = useState<SessionTask | null>(null);
@@ -793,28 +803,40 @@ export default function SessionScreen({ route, navigation }: Props) {
       const r = fresh[0];
       const senderName = members.find(m => m.userId === r.fromUserId)?.displayName ?? 'Someone';
       const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title ?? 'your task';
-      if (!inAppSilent) {
-        flash(`${senderName}: "${r.text}"${taskTitle !== 'your task' ? ` on "${taskTitle}"` : ''}`);
-      }
 
-      // Persist the reaction in the activity center (survives session end / app close)
+      // Always persist the reaction to the Activity Center
       addActivity({
         type: 'reaction',
+        fromUserId: r.fromUserId,
         fromDisplayName: senderName,
+        taskId: r.taskId,
         taskTitle,
-        text: r.text,
+        message: r.text,
+        createdAt: r.sentAt,
         sentAt: r.sentAt,
         sessionId,
       });
 
-      // Push notification when partner reactions push is enabled
-      if (userSettings.partnerReactionPushEnabled) {
-        showPartnerReactionNotification({
-          fromDisplayName: senderName,
-          reactionText: r.text,
-          taskTitle,
-        }).catch(console.error);
+      // Partner reaction display logic:
+      // - Push disabled or silent mode → Activity Center only, no popup, no vibration.
+      // - Push enabled + app in foreground → in-app modal + subtle vibration (no OS push).
+      // - Push enabled + app in background → OS push notification (user can't see the modal).
+      if (!inAppSilent && userSettings.partnerReactionPushEnabled) {
+        if (AppState.currentState === 'active') {
+          // User is actively in the app: use the themed in-app popup + vibration.
+          setPartnerReactionModal({ fromDisplayName: senderName, taskTitle, message: r.text });
+          // Two short pulses: unobtrusive but noticeable (pattern: [wait,on,off,on] ms).
+          Vibration.vibrate([0, 120, 80, 120]);
+        } else {
+          // App is backgrounded: escalate to OS push so the user sees the reaction.
+          showPartnerReactionNotification({
+            fromDisplayName: senderName,
+            reactionText: r.text,
+            taskTitle,
+          }).catch(console.error);
+        }
       }
+      // When push disabled or silent: only Activity Center entry, nothing else.
     }
     prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
   // addActivity and userSettings are stable refs captured at call time — OK to exclude
@@ -940,7 +962,8 @@ export default function SessionScreen({ route, navigation }: Props) {
   async function handleSendReaction(text: string) {
     if (!reactionTarget) { return; }
     await sendReaction(reactionTarget.toUserId, reactionTarget.taskId, text);
-    flash(`Sent: "${text}"`);
+    // Confirmation goes to the bottom snackbar — compact and non-intrusive.
+    flash(`Reaction sent ✓`);
   }
 
   if (loading) {
@@ -978,8 +1001,10 @@ export default function SessionScreen({ route, navigation }: Props) {
 
   return (
     <Screen safeArea edges={['top']}>
-      {/* Flash banner */}
-      <Animated.View style={[s.flashBanner, { opacity: flashOpacity }]} pointerEvents="none">
+      {/* Bottom snackbar — shown for task done, reaction sent, join events, errors */}
+      <Animated.View
+        style={[s.flashBanner, { opacity: flashOpacity, bottom: Math.max(insets.bottom, 16) + 12 }]}
+        pointerEvents="none">
         <Text style={[s.flashText, { color: c.text }]}>{flashMessage}</Text>
       </Animated.View>
 
@@ -1029,6 +1054,17 @@ export default function SessionScreen({ route, navigation }: Props) {
           onLeave={isHost ? undefined : handleLeave}
           c={c}
           s={s}
+        />
+      )}
+
+      {/* ── Partner reaction fancy popup ─────────────────────────── */}
+      {partnerReactionModal && (
+        <PartnerReactionModal
+          visible={partnerReactionModal !== null}
+          fromDisplayName={partnerReactionModal.fromDisplayName}
+          taskTitle={partnerReactionModal.taskTitle}
+          message={partnerReactionModal.message}
+          onDismiss={() => setPartnerReactionModal(null)}
         />
       )}
 
@@ -1138,7 +1174,8 @@ export default function SessionScreen({ route, navigation }: Props) {
                 renderItem={({ item, getIndex, drag, isActive: dragActive }: RenderItemParams<SessionTask>) => (
                   <ScaleDecorator>
                     <SwipeableRow
-                      borderRadius={r.md}
+                      borderRadius={12}
+                      style={{ marginBottom: 8 }}
                       onDelete={() => handleRemoveTask(item)}
                       dragHandleReserveWidth={56}>
                       <SessionQueueTaskRow
@@ -1190,12 +1227,19 @@ export default function SessionScreen({ route, navigation }: Props) {
                   {myCompletedTasks.map(task => {
                     const focusSecs = task.accumulatedSeconds ?? 0;
                     return (
-                      <View key={task.taskId} style={[s.sqCompletedRow, { backgroundColor: c.surface, borderColor: c.border }]}>
-                        <Text style={[s.sqCompletedTitle, { color: c.textSoft }]} numberOfLines={1}>{task.title}</Text>
-                        <Text style={[s.sqCompletedTime, { color: c.success }]}>
-                          {focusSecs > 0 ? `Done in ${formatSeconds(focusSecs)}` : 'Done'}
-                        </Text>
-                      </View>
+                      // borderRadius=8 matches sqCompletedRow's borderRadius so the red
+                      // underlay is correctly clipped to the card's rounded corners.
+                      <SwipeableRow
+                        key={task.taskId}
+                        borderRadius={8}
+                        onDelete={() => handleRemoveTask(task)}>
+                        <View style={[s.sqCompletedRow, { backgroundColor: c.surface, borderColor: c.border }]}>
+                          <Text style={[s.sqCompletedTitle, { color: c.textSoft }]} numberOfLines={1}>{task.title}</Text>
+                          <Text style={[s.sqCompletedTime, { color: c.success }]}>
+                            {focusSecs > 0 ? `Done in ${formatSeconds(focusSecs)}` : 'Done'}
+                          </Text>
+                        </View>
+                      </SwipeableRow>
                     );
                   })}
                 </View>
@@ -1343,10 +1387,14 @@ function buildStyles(thm: AppTheme) {
     errorBackBtn: { paddingVertical: 10, paddingHorizontal: sp.gutter },
     errorBackBtnText: { fontSize: 14 },
 
+    // Bottom snackbar — inset.bottom is applied inline in JSX so this style
+    // just sets the horizontal position, shape, and z-order.
     flashBanner: {
-      position: 'absolute', top: 60, left: sp.gutter, right: sp.gutter, zIndex: 100,
-      backgroundColor: c.surface, borderRadius: r.md, borderWidth: 1, borderColor: c.border,
-      paddingVertical: 14, paddingHorizontal: 18,
+      position: 'absolute', bottom: 16, left: sp.gutter, right: sp.gutter, zIndex: 100,
+      backgroundColor: c.surfaceRaised, borderRadius: r.md, borderWidth: 1, borderColor: c.border,
+      paddingVertical: 12, paddingHorizontal: 18,
+      shadowColor: c.shadow, shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.14, shadowRadius: 10, elevation: 8,
     },
     flashText: { fontSize: 14, fontWeight: '500', textAlign: 'center' },
 
@@ -1414,10 +1462,12 @@ function buildStyles(thm: AppTheme) {
     myDoneBtnText: { fontSize: 12, fontWeight: '500' },
 
     // ── Session queue rows ──────────────────────────────────────────────────
+    // marginBottom intentionally removed — it lives on the SwipeableRow wrapper in JSX
+    // so the danger-red underlay never bleeds into the inter-row gap on swipe.
     sqRow: {
       flexDirection: 'row', alignItems: 'center',
       borderRadius: 12, borderWidth: 1,
-      marginBottom: 8, overflow: 'hidden',
+      overflow: 'hidden',
     },
     sqDragHandle: { paddingHorizontal: 10, paddingVertical: 14, justifyContent: 'center', alignItems: 'center' },
     sqDragHandleText: { fontSize: 18 },
