@@ -1,3 +1,5 @@
+import type { ReminderPreset } from './settingsPreferences';
+
 export type Task = {
   id: string;
   userId: string;
@@ -21,6 +23,11 @@ export type Task = {
    * Non-null while the task is #1 or pinned. Live elapsed = accumulatedSeconds + (now - timerStartedAt) / 1000
    */
   timerStartedAt: number | null;
+  /**
+   * Per-task reminder frequency override. When set, overrides the user's global
+   * reminderPreset for this task only. When absent, the global setting applies.
+   */
+  reminderPreset?: ReminderPreset;
   /** Set when this task was synced from a Together session. Prevents it showing as a solo history item. */
   sessionId?: string;
   /** Set on the original solo task when it is completed inside a Together session. Prevents double-counting in solo history. */

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import type { SessionMember, SessionTask, Reaction } from '../../types/Session';
 import { useTheme } from '../../theme/ThemeContext';
 import { formatElapsed } from '../../utils/formatElapsed';
+import { TimerEstimateBlock } from '../tasks/TimerEstimateBlock';
 import { PulsingDot } from './PulsingDot';
 import { ReactionButton } from './ReactionButton';
 import { TaskReactions } from './TaskReactions';
@@ -80,21 +81,25 @@ export function PartnerCard({
             <Text style={[styles.partnerFocusTitle, { color: c.text }]} numberOfLines={2}>
               {focusTask.title}
             </Text>
-            <View style={styles.partnerFocusMeta}>
-              <Text
-                style={[
-                  styles.partnerFocusTimer,
-                  { color: focusFocusMs > 86400 * 1000 ? c.dangerMuted : c.accent },
-                ]}>
-                {formatElapsed(focusFocusMs)}
-              </Text>
-              {focusTask.estimatedMs != null && (
-                <Text style={[styles.partnerEstimate, { color: focusOver ? c.danger : c.textMuted }]}>
-                  {focusOver
-                    ? `over by ${formatElapsed(focusFocusMs - focusTask.estimatedMs)}`
-                    : `est. ${formatElapsed(focusTask.estimatedMs)}`}
-                </Text>
-              )}
+            <View
+              style={[styles.partnerFocusMeta, { marginTop: 2, gap: sp.sm, alignItems: 'flex-start' }]}>
+              <View style={{ flex: 1, minWidth: 0, marginRight: sp.sm }}>
+                <TimerEstimateBlock
+                  elapsedLabel={formatElapsed(focusFocusMs)}
+                  secondaryLabel={
+                    focusTask.estimatedMs != null
+                      ? focusOver
+                        ? `over by ${formatElapsed(focusFocusMs - focusTask.estimatedMs)}`
+                        : `est. ${formatElapsed(focusTask.estimatedMs)}`
+                      : null
+                  }
+                  isOverEstimate={focusOver}
+                  density="partnerFocus"
+                  elapsedColor={focusFocusMs > 86400 * 1000 ? c.dangerMuted : c.accent}
+                  secondaryMutedColor={focusOver ? c.danger : c.textMuted}
+                  overdueSecondaryColor={c.danger}
+                />
+              </View>
               <ReactionButton
                 variant="focus"
                 onPress={() => onReact(focusTask.taskId, false)}
@@ -170,24 +175,23 @@ function PartnerTaskRow({
           {task.title}
         </Text>
         {!isDone && (
-          <Text
-            style={[
-              styles.partnerTaskTimer,
-              { color: elapsed > 86400 * 1000 ? c.dangerMuted : c.textSecondary },
-            ]}>
-            {formatElapsed(elapsed)}
-          </Text>
-        )}
-        {!isDone && task.estimatedMs != null && (
-          <Text
-            style={[
-              styles.partnerEstimate,
-              { color: elapsed > task.estimatedMs ? c.danger : c.textMuted },
-            ]}>
-            {elapsed > task.estimatedMs
-              ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
-              : `est. ${formatElapsed(task.estimatedMs)}`}
-          </Text>
+          <TimerEstimateBlock
+            elapsedLabel={formatElapsed(elapsed)}
+            secondaryLabel={
+              task.estimatedMs != null
+                ? elapsed > task.estimatedMs
+                  ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                  : `est. ${formatElapsed(task.estimatedMs)}`
+                : null
+            }
+            isOverEstimate={task.estimatedMs != null && elapsed > task.estimatedMs}
+            density="partnerRow"
+            elapsedColor={elapsed > 86400 * 1000 ? c.dangerMuted : c.textSecondary}
+            secondaryMutedColor={
+              task.estimatedMs != null && elapsed > task.estimatedMs ? c.danger : c.textMuted
+            }
+            overdueSecondaryColor={c.danger}
+          />
         )}
         {isDone && (
           <Text style={[styles.partnerTaskDoneLabel, { color: c.success }]}>
@@ -219,11 +223,10 @@ const styles = StyleSheet.create({
   partnerFocusTitle: { fontSize: 15, fontWeight: '500' },
   partnerFocusMeta: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginTop: 2,
+    width: '100%',
   },
-  partnerFocusTimer: { fontSize: 13, fontVariant: ['tabular-nums'] },
   partnerTask: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -233,7 +236,5 @@ const styles = StyleSheet.create({
   },
   partnerTaskLeft: { flex: 1 },
   partnerTaskTitle: { fontSize: 14, fontWeight: '500' },
-  partnerTaskTimer: { fontSize: 12, fontVariant: ['tabular-nums'] },
   partnerTaskDoneLabel: { fontSize: 12 },
-  partnerEstimate: { fontSize: 11 },
 });

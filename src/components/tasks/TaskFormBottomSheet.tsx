@@ -184,13 +184,16 @@ export function TaskFormBottomSheet({
     }
   }
 
-  const cardBottom = insets.bottom + 100;
+  // Keep the card above the safe-area + a small breathing gap.
+  // On iOS KeyboardAvoidingView 'padding' lifts it above the keyboard automatically.
+  // On Android we use 'height' so the Modal container shrinks when the keyboard appears.
+  const cardBottom = insets.bottom + 16;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <KeyboardAvoidingView
         style={s.host}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <TouchableOpacity style={s.backdrop} activeOpacity={1} onPress={handleClose} />
         <View style={[s.card, { marginBottom: cardBottom, backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
           <View style={[s.handle, { backgroundColor: c.borderStrong }]} />

@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -8,7 +9,6 @@ import {
   StyleSheet,
   Modal,
   ActivityIndicator,
-  Animated,
 } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import type { RenderItemParams } from 'react-native-draggable-flatlist';
@@ -30,7 +30,12 @@ import { subscribeToUserProfile, setActiveSession } from '../services/userServic
 import { getSessionOnce } from '../services/sessionService';
 import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
 import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
+import { TimerEstimateBlock } from '../components/tasks/TimerEstimateBlock';
 import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
+import { FancyReminderModal } from '../components/reminders/FancyReminderModal';
+import { useSoloReminderEngine } from '../hooks/useSoloReminderEngine';
+import { useUserSettings } from '../context/UserSettingsContext';
+import { ActivityCenterIcon } from '../components/layout/ActivityCenterIcon';
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -225,40 +230,41 @@ function QueueTaskRow({ task, position, now, onComplete, onDelete, onEdit, onLon
 
         {isTimerRunning ? (
           <View style={s.queueTimerRow}>
-            <Text
-              style={[
-                s.queueTimer,
-                {
-                  color: isOverEstimate
-                    ? c.danger
-                    : isFocusedRow
-                      ? c.accent
-                      : c.textMuted,
-                },
-              ]}
-              numberOfLines={1}>
-              {formatSeconds(liveSeconds)}
-            </Text>
-            {estimatedSec !== null && (
-              <Text style={[s.queueEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
-                {isOverEstimate
-                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
-                  : `est. ${formatSeconds(estimatedSec)}`}
-              </Text>
-            )}
+            <TimerEstimateBlock
+              elapsedLabel={formatSeconds(liveSeconds)}
+              secondaryLabel={
+                estimatedSec !== null
+                  ? isOverEstimate
+                    ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                    : `est. ${formatSeconds(estimatedSec)}`
+                  : null
+              }
+              isOverEstimate={Boolean(isOverEstimate && estimatedSec !== null)}
+              density="queue"
+              elapsedColor={
+                isOverEstimate ? c.danger : isFocusedRow ? c.accent : c.textMuted
+              }
+              secondaryMutedColor={isOverEstimate ? c.dangerMuted : c.textSoft}
+              overdueSecondaryColor={c.dangerMuted}
+            />
           </View>
         ) : hasFocusTime ? (
           <View style={s.queueTimerRow}>
-            <Text style={[s.queueTimer, { color: c.textMuted }]} numberOfLines={1}>
-              {formatSeconds(liveSeconds)}
-            </Text>
-            {estimatedSec !== null && (
-              <Text style={[s.queueEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
-                {isOverEstimate
-                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
-                  : `est. ${formatSeconds(estimatedSec)}`}
-              </Text>
-            )}
+            <TimerEstimateBlock
+              elapsedLabel={formatSeconds(liveSeconds)}
+              secondaryLabel={
+                estimatedSec !== null
+                  ? isOverEstimate
+                    ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                    : `est. ${formatSeconds(estimatedSec)}`
+                  : null
+              }
+              isOverEstimate={Boolean(isOverEstimate && estimatedSec !== null)}
+              density="queue"
+              elapsedColor={c.textMuted}
+              secondaryMutedColor={isOverEstimate ? c.dangerMuted : c.textSoft}
+              overdueSecondaryColor={c.dangerMuted}
+            />
           </View>
         ) : (
           <View style={s.queueTimerRow}>
@@ -577,24 +583,6 @@ function buildHistorySections(
     }));
 }
 
-// ─── Flash banner ─────────────────────────────────────────────────────────────
-
-function useDoneFlash() {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const [message, setMessage] = useState('');
-
-  const flash = useCallback((msg: string) => {
-    setMessage(msg);
-    Animated.sequence([
-      Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.delay(2200),
-      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }),
-    ]).start();
-  }, [opacity]);
-
-  return { opacity, message, flash };
-}
-
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 type ActiveTab = 'active' | 'history';
@@ -610,13 +598,25 @@ export default function HomeScreen({ navigation }: Props) {
 
   const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks, pinTask, unpinTask } = useTasks();
   const { sessionHistory, loading: historyLoading } = useSessionHistory();
+
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [actionSheetTask, setActionSheetTask] = useState<Task | null>(null);
   const [tab, setTab] = useState<ActiveTab>('active');
-  const now = useNow();
-  const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
 
+  const isFocused = useIsFocused();
+  const { settings: userSettings, ready: settingsReady } = useUserSettings();
+  const reminder = useSoloReminderEngine({
+    activeTasks,
+    // Gate on settingsReady so the engine never fires with the stale default tone
+    // before UserSettingsContext has finished reading from AsyncStorage.
+    enabled: isFocused && tab === 'active' && settingsReady,
+    tone: userSettings.sarcasmLevel,
+    globalReminderPreset: userSettings.reminderPreset,
+    // Suppress pop-ups while any blocking sheet (add/edit) or action sheet is open
+    suppressPopups: modalVisible || editingTask !== null || actionSheetTask !== null,
+  });
+  const now = useNow();
   const [rejoinSessionId, setRejoinSessionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -671,7 +671,7 @@ export default function HomeScreen({ navigation }: Props) {
       : 0;
     const focusSecs = (task.accumulatedSeconds ?? 0) + liveSecs;
     const focusMs = focusSecs > 0 ? focusSecs * 1000 : Date.now() - task.createdAt;
-    flash(`You did it. It took ${formatElapsed(focusMs)} but you did it.`);
+    reminder.notifyTaskCompleted(task);
   }
 
   async function handleDelete(task: Task) {
@@ -692,12 +692,15 @@ export default function HomeScreen({ navigation }: Props) {
       title: payload.title,
       estimatedMs: payload.estimatedMs,
       isPublic: payload.togetherVisibility === 'visible',
+      // null = clear task override (fall back to global); explicit preset = save override
+      reminderPreset: payload.reminderPresetOverride ?? null,
     });
   }
 
   async function handleCreateTask(payload: TaskFormCommitPayload) {
     await addTask(payload.title, payload.estimatedMs, {
       isPublic: payload.togetherVisibility === 'visible',
+      reminderPreset: payload.reminderPresetOverride ?? undefined,
     });
   }
 
@@ -724,17 +727,13 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <Screen safeArea edges={['top']}>
-      {/* ── Flash banner ─────────────────────────────── */}
-      <Animated.View style={[s.flashBanner, { opacity: flashOpacity }]} pointerEvents="none">
-        <Text style={[s.flashText, { color: c.text }]}>{flashMessage}</Text>
-      </Animated.View>
-
       {/* ── Header ───────────────────────────────────── */}
       <ScreenHeader
         title="Since When"
         badge={{ text: 'SOLO', variant: 'muted' }}
         trailing={
           <View style={s.headerActions}>
+            <ActivityCenterIcon />
             <TouchableOpacity style={s.themeToggleBtn} onPress={toggleTheme}>
               {isDark
                 ? <SunIcon color={c.accentMuted} />
@@ -947,7 +946,7 @@ export default function HomeScreen({ navigation }: Props) {
         submitLabel="Start the clock"
         timePresets={timePresets}
         initial={{
-          reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+          reminderPreset: userSettings.reminderPreset,
           togetherVisibility: SETTINGS_DEFAULTS.togetherVisibility,
         }}
         onCommit={async payload => {
@@ -970,7 +969,10 @@ export default function HomeScreen({ navigation }: Props) {
             ? {
                 title: editingTask.title,
                 estimatedMs: editingTask.estimatedMs,
-                reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+                // Pre-fill the form with the task's own override (if any),
+                // otherwise fall back to the global setting so the chip looks right.
+                reminderPreset: editingTask.reminderPreset ?? userSettings.reminderPreset,
+                reminderPresetOverride: editingTask.reminderPreset ?? null,
                 togetherVisibility: editingTask.isPublic ? 'visible' : 'hidden',
               }
             : undefined
@@ -979,6 +981,16 @@ export default function HomeScreen({ navigation }: Props) {
           if (!editingTask) { return; }
           await handleEdit(editingTask.id, payload);
         }}
+      />
+
+      <FancyReminderModal
+        visible={reminder.visible}
+        emoji={reminder.emoji}
+        message={reminder.message}
+        contextTaskTitle={reminder.contextTaskTitle}
+        contextTimingLabel={reminder.contextTimingLabel}
+        isCompletion={reminder.isCompletion}
+        onDismiss={reminder.dismiss}
       />
 
       <TaskActionSheet
@@ -1086,13 +1098,6 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     loadingRoot: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: sp.xl + sp.sm },
     errorText: { fontSize: 15, fontWeight: '600', marginBottom: sp.sm, textAlign: 'center' },
     errorDetail: { fontSize: 13, textAlign: 'center', lineHeight: 20 },
-
-    flashBanner: {
-      position: 'absolute', top: 60, left: sp.gutter, right: sp.gutter, zIndex: 100,
-      backgroundColor: c.surface, borderRadius: r.md, borderWidth: 1, borderColor: c.border,
-      paddingVertical: 14, paddingHorizontal: 18,
-    },
-    flashText: { fontSize: 14, fontWeight: '500', textAlign: 'center' },
 
     headerActions: { flexDirection: 'row', alignItems: 'center', gap: sp.xs, marginTop: sp.xs },
     themeToggleBtn: { paddingVertical: 6, paddingHorizontal: sp.sm, justifyContent: 'center', alignItems: 'center' },
@@ -1205,8 +1210,7 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     queueContent: { flex: 1, marginRight: sp.sm },
     queueTitle: { fontSize: 15, fontWeight: '500', marginBottom: 3 },
     queueMeta: { fontSize: 12 },
-    queueTimerRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-    queueTimer: { fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+    queueTimerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
     queueEstimate: { fontSize: 12, fontVariant: ['tabular-nums'] },
     queueRowActions: {
       flexDirection: 'row',

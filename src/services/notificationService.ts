@@ -4,6 +4,10 @@ import notifee, { AndroidImportance, TimestampTrigger, TriggerType } from '@noti
 const SESSION_TIMER_CHANNEL_ID = 'session-timer';
 const SESSION_TIMER_NOTIFICATION_ID = 'session-timer-ended';
 
+/** Separate channel for partner activity (reactions, join requests). */
+const PARTNER_ACTIVITY_CHANNEL_ID = 'partner-activity';
+const PARTNER_ACTIVITY_CHANNEL_NAME = 'Partner activity';
+
 async function requestAndroidNotificationPermission(): Promise<boolean> {
   if (Platform.OS !== 'android') {
     return true;
@@ -37,6 +41,45 @@ export async function ensureNotificationChannel(): Promise<void> {
     id: SESSION_TIMER_CHANNEL_ID,
     name: 'Session timer',
     importance: AndroidImportance.HIGH,
+  });
+  await notifee.createChannel({
+    id: PARTNER_ACTIVITY_CHANNEL_ID,
+    name: PARTNER_ACTIVITY_CHANNEL_NAME,
+    importance: AndroidImportance.HIGH,
+  });
+}
+
+/**
+ * Show a local push notification for an incoming partner reaction.
+ * Call only when the user has partner reaction push notifications enabled.
+ */
+export async function showPartnerReactionNotification(params: {
+  fromDisplayName: string;
+  reactionText: string;
+  taskTitle: string;
+}): Promise<void> {
+  await notifee.displayNotification({
+    title: `${params.fromDisplayName} reacted`,
+    body: `"${params.reactionText}" on "${params.taskTitle}"`,
+    android: {
+      channelId: PARTNER_ACTIVITY_CHANNEL_ID,
+      pressAction: { id: 'default' },
+    },
+  });
+}
+
+/**
+ * Show a local push notification when a partner is requesting to join a session.
+ * Call only when the user has push notifications enabled.
+ */
+export async function showJoinRequestNotification(displayName: string): Promise<void> {
+  await notifee.displayNotification({
+    title: 'Someone wants to join',
+    body: `${displayName} is requesting to join your Together session.`,
+    android: {
+      channelId: PARTNER_ACTIVITY_CHANNEL_ID,
+      pressAction: { id: 'default' },
+    },
   });
 }
 

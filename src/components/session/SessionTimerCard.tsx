@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import type { SessionTask } from '../../types/Session';
 import { useTheme } from '../../theme/ThemeContext';
 import { formatElapsed } from '../../utils/formatElapsed';
+import { TimerEstimateBlock } from '../tasks/TimerEstimateBlock';
 import { PulsingDot } from './PulsingDot';
 
 export type SessionTimerCardProps = {
@@ -43,21 +44,22 @@ export function SessionTimerCard({
         <Text style={[styles.focusLabel, { color: c.accent }]}>FOCUS</Text>
       </View>
       <Text style={[styles.focusTitle, { color: c.text }]}>{task.title}</Text>
-      <View style={[styles.focusTimerRow, { gap: sp.sm }]}>
-        <Text
-          style={[
-            styles.focusTimer,
-            { color: (isOld || overEstimate) ? c.danger : c.accent },
-          ]}>
-          {formatElapsed(elapsed)}
-        </Text>
-        {task.estimatedMs != null && (
-          <Text style={[styles.focusEstimate, { color: overEstimate ? c.dangerMuted : c.textSoft }]}>
-            {overEstimate
-              ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
-              : `est. ${formatElapsed(task.estimatedMs)}`}
-          </Text>
-        )}
+      <View style={styles.focusTimerRow}>
+        <TimerEstimateBlock
+          elapsedLabel={formatElapsed(elapsed)}
+          secondaryLabel={
+            task.estimatedMs != null
+              ? overEstimate
+                ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                : `est. ${formatElapsed(task.estimatedMs)}`
+              : null
+          }
+          isOverEstimate={overEstimate}
+          density="focusHero"
+          elapsedColor={(isOld || overEstimate) ? c.danger : c.accent}
+          secondaryMutedColor={overEstimate ? c.dangerMuted : c.textSoft}
+          overdueSecondaryColor={c.dangerMuted}
+        />
       </View>
       <View style={[styles.focusActions, { gap: sp.sm }]}>
         <TouchableOpacity
@@ -86,12 +88,9 @@ const styles = StyleSheet.create({
   focusTitle: { fontSize: 20, fontWeight: '600', lineHeight: 26 },
   focusTimerRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    flexWrap: 'wrap',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
-  focusTimer: { fontSize: 16, fontWeight: '500', fontVariant: ['tabular-nums'] },
-  focusEstimate: { fontSize: 12, fontVariant: ['tabular-nums'] },
   focusActions: { flexDirection: 'row', marginTop: 6 },
   focusDoneBtn: { flex: 1, borderRadius: 9, paddingVertical: 11, alignItems: 'center' },
   focusDoneBtnText: { fontSize: 14, fontWeight: '600' },

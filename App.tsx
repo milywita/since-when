@@ -12,6 +12,8 @@ import AuthNavigator from './src/navigation/AuthNavigator';
 import AppNavigator from './src/navigation/AppNavigator';
 import { ThemeProvider, useTheme, useThemeToggle } from './src/theme/ThemeContext';
 import { TaskEstimatePresetsProvider } from './src/context/TaskEstimatePresetsContext';
+import { UserSettingsProvider } from './src/context/UserSettingsContext';
+import { ActivityCenterProvider } from './src/context/ActivityCenterContext';
 
 function AppContent() {
   const { colors: c } = useTheme();
@@ -61,9 +63,13 @@ export default function App() {
     <GestureHandlerRootView style={styles.gestureRoot}>
       <ThemeProvider>
         <SafeAreaProvider>
-          <TaskEstimatePresetsProvider>
-            <AppContent />
-          </TaskEstimatePresetsProvider>
+          <UserSettingsProvider>
+            <ActivityCenterProvider>
+              <TaskEstimatePresetsProvider>
+                <AppContent />
+              </TaskEstimatePresetsProvider>
+            </ActivityCenterProvider>
+          </UserSettingsProvider>
         </SafeAreaProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

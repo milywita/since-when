@@ -33,7 +33,7 @@ export function useTasks() {
   const completedTasks = tasks.filter(t => t.completedAt !== null);
 
   const addTask = useCallback(
-    (title: string, estimatedMs: number | null, options?: { isPublic?: boolean }) => {
+    (title: string, estimatedMs: number | null, options?: { isPublic?: boolean; reminderPreset?: import('../types/settingsPreferences').ReminderPreset }) => {
       if (!userId) { return Promise.resolve(); }
       return svcAdd(userId, title, estimatedMs, activeTasks.length, options);
     },
@@ -57,7 +57,7 @@ export function useTasks() {
   );
 
   const updateTask = useCallback(
-    (taskId: string, changes: { title?: string; estimatedMs?: number | null; isPublic?: boolean }) => {
+    (taskId: string, changes: { title?: string; estimatedMs?: number | null; isPublic?: boolean; reminderPreset?: import('../types/settingsPreferences').ReminderPreset | null }) => {
       if (!userId) { return Promise.resolve(); }
       return svcUpdate(userId, taskId, changes);
     },

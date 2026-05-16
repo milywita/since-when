@@ -22,13 +22,12 @@ import {
 import { useTheme } from '../theme/ThemeContext';
 import type { AppTheme } from '../theme/themes';
 import type { AppScreenProps } from '../navigation/types';
-import {
-  SETTINGS_DEFAULTS,
-  type ReminderPreset,
-  type SarcasmLevel,
-} from '../types/settingsPreferences';
+import type { ReminderPreset, SarcasmLevel } from '../types/settingsPreferences';
+import { useUserSettings } from '../context/UserSettingsContext';
 
 type Props = AppScreenProps<'Settings'>;
+
+// ─── Static metadata ──────────────────────────────────────────────────────────
 
 const SARCASM_ORDER: SarcasmLevel[] = ['formal', 'softie', 'sarcastic', 'mystic'];
 
@@ -39,7 +38,6 @@ const SARCASM_LABEL: Record<SarcasmLevel, string> = {
   mystic: 'Mystic',
 };
 
-/** Tagline + sample line for the selected tone (placeholder copy for future reminder text). */
 const SARCASM_DETAIL: Record<SarcasmLevel, { tagline: string; example: string }> = {
   formal: {
     tagline: 'Clear, calm reminders with no jokes.',
@@ -59,53 +57,57 @@ const SARCASM_DETAIL: Record<SarcasmLevel, { tagline: string; example: string }>
   },
 };
 
-const REMINDER_META: {
-  id: ReminderPreset;
-  title: string;
-  description: string;
-}[] = [
-  { id: 'silent', title: 'Silent', description: 'No automatic reminders.' },
-  { id: 'normal', title: 'Normal', description: 'Due soon and overdue only.' },
-  { id: 'annoyMe', title: 'Annoy Me', description: 'More frequent reminders with sarcasm.' },
+const REMINDER_META: { id: ReminderPreset; title: string; description: string }[] = [
+  {
+    id: 'silent',
+    title: 'Silent',
+    description: 'No in-app reminders or pop-ups.',
+  },
+  {
+    id: 'normal',
+    title: 'Normal',
+    description: 'Standard timing based on task rank.',
+  },
+  {
+    id: 'annoyMe',
+    title: 'Annoy Me',
+    description: 'Reminders fire sooner and more often.',
+  },
   {
     id: 'partnerOnly',
     title: 'Partner Only',
-    description: 'Together Mode only — see section info for details.',
+    description: 'Only partner reactions notify you.',
   },
 ];
 
-const NOTIFICATIONS_SECTION_INFO_BODY =
-  'App reminders and partner reactions control two different kinds of pop-ups.\n\n' +
-  'If pop-ups are off for either option, those updates still appear quietly in the app feed without interrupting you.\n\n' +
-  'TODO: Connect to OS notification permissions and in-app feed routing when implemented.';
+// ─── Info copy ────────────────────────────────────────────────────────────────
 
-const APP_REMINDERS_INFO_BODY =
-  'Sarcastic task pop-ups when a task is delayed too long or takes much longer than expected.\n\n' +
-  'Copy and timing follow your Sarcasm / Reminder Tone setting once scheduling is wired up.\n\n' +
-  'TODO: Tie pop-ups to delay and estimate thresholds when notifications ship.';
+/** Longer explainer for (i) — no “turn off session” language; critical OS alerts are not a setting here. */
+const PARTNER_REACTION_POPUPS_INFO =
 
-const PARTNER_REACTIONS_INFO_BODY =
-  'Pop-ups when your Together Mode partner reacts or nudges you.\n\n' +
-  'When this is off, partner activity still appears in the app feed without interrupting you.\n\n' +
-  'TODO: Gate on active Together session and partner permissions when implemented.';
+  'This switch only affects partner reaction and nudge alerts. When off, new items appear quietly in Activity.';
 
-const REMINDER_FREQUENCY_INFO_BODY =
-  'Reminder frequency sets how often and how strongly the app nudges you about tasks in general (placeholder until scheduling and notifications are wired up).\n\n' +
-  'Partner Only (Together Mode): the app should not send fallback reminders; only partner reactions and nudges can notify you. If partner reaction pop-ups are off, those updates appear quietly in the app feed.\n\n' +
-  'TODO: Allow each task to override the global reminder frequency when persistence ships.';
+const REMINDER_FREQUENCY_INFO =
+  'Controls in-app pop-ups and nudges.\n\n' +
+  'Silent: no reminders or celebrations.\n' +
+  'Normal: standard timing.\n' +
+  'Annoy Me: sooner, more frequent nudges.\n' +
+  'Partner Only: no solo reminders; partner reactions still apply.\n\n' +
+  'Per-task overrides are ignored while Silent is active.';
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen({ navigation }: Props) {
   const thm = useTheme();
   const { colors: c, spacing: sp } = thm;
   const s = useMemo(() => buildStyles(thm), [thm]);
 
-  // TODO: Replace useState below with persisted user settings (Firestore / AsyncStorage).
-  // TODO: Wire appReminders + partnerReactionPopups to real notification / in-feed routing when implemented.
-  const [appReminders, setAppReminders] = useState(true);
-  const [partnerReactionPopups, setPartnerReactionPopups] = useState(true);
-
-  const [sarcasmLevel, setSarcasmLevel] = useState<SarcasmLevel>(SETTINGS_DEFAULTS.sarcasmLevel);
-  const [reminderPreset, setReminderPreset] = useState<ReminderPreset>(SETTINGS_DEFAULTS.reminderPreset);
+  const {
+    settings,
+    setSarcasmLevel,
+    setReminderPreset,
+    setPartnerReactionPushEnabled,
+  } = useUserSettings();
 
   const scrollRef = useRef<ScrollView>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -118,10 +120,6 @@ export default function SettingsScreen({ navigation }: Props) {
       scrollTopVisibleRef.current = next;
       setShowScrollTop(next);
     }
-  }
-
-  function scrollToTop() {
-    scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   return (
@@ -140,64 +138,41 @@ export default function SettingsScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
           onScroll={handleScroll}
           scrollEventThrottle={32}>
-          <Text style={[s.pageIntro, { color: c.textSoft }]}>
-            Notification and reminder options below are preview-only until persistence ships. Nothing here
-            changes real push behavior yet.
-          </Text>
 
+          {/* ── Partner reaction pop-ups ─────────────────────────────── */}
           <SettingsSection
-            title="Notifications / Pop-ups"
-            description="Choose what may interrupt you versus what stays in the feed."
+            title="Push Notifications"
+            description="Show pop-ups when your Together Mode partner reacts or nudges you. If off, reactions appear quietly in Activity."
             titleTrailing={
               <SettingsInfoIcon
-                hintTitle="Notifications / Pop-ups"
-                hintBody={NOTIFICATIONS_SECTION_INFO_BODY}
+                hintTitle="Push Notifications"
+                hintBody={PARTNER_REACTION_POPUPS_INFO}
               />
             }>
-            <View style={[s.notificationsHelper, { borderBottomColor: c.borderInner }]}>
-              <Text style={[s.notificationsHelperText, { color: c.textMuted }]}>
-                If pop-ups are off, updates should appear quietly in the app feed without interrupting the
-                user.
-              </Text>
-            </View>
-            <SettingsToggleRow
-              title="App reminders"
-              description="Sarcastic task pop-ups when a task is delayed too long or takes much longer than expected."
-              value={appReminders}
-              onValueChange={setAppReminders}
-              infoHint={{ title: 'App reminders', body: APP_REMINDERS_INFO_BODY }}
-            />
-            <SettingsToggleRow
-              title="Partner reactions"
-              description="Pop-ups when your Together Mode partner reacts or nudges you."
-              value={partnerReactionPopups}
-              onValueChange={setPartnerReactionPopups}
-              infoHint={{ title: 'Partner reactions', body: PARTNER_REACTIONS_INFO_BODY }}
-              showDivider={false}
-            />
+            {settings.reminderPreset !== 'silent' ? (
+              <SettingsToggleRow
+                title="Partner reactions"
+                value={settings.partnerReactionPushEnabled}
+                onValueChange={setPartnerReactionPushEnabled}
+                showDivider={false}
+              />
+            ) : null}
           </SettingsSection>
 
+          {/* ── Sarcasm / Reminder Tone section ────────────────────── */}
           <SettingsSection
             title="Sarcasm / Reminder Tone"
-            description="How reminder copy will sound once scheduling is wired up.">
-            {/* TODO: Allow tone overrides per task category/type. */}
-            <View
-              style={[
-                s.toneStrip,
-                { paddingHorizontal: sp.lg, paddingTop: sp.lg, paddingBottom: sp.md },
-              ]}>
+            description="Controls in-app task reminder pop-ups.">
+            <View style={[s.toneStrip, { paddingHorizontal: sp.lg, paddingTop: sp.lg, paddingBottom: sp.md }]}>
               <View style={[s.toneTwoRows, { gap: sp.sm }]}>
                 <View style={[s.toneChipRow, { gap: sp.sm }]}>
                   {SARCASM_ORDER.slice(0, 2).map(level => (
                     <View key={level} style={s.toneChipCellFlex}>
                       <SettingsPillOption
                         label={SARCASM_LABEL[level]}
-                        selected={sarcasmLevel === level}
+                        selected={settings.sarcasmLevel === level}
                         fillCell
-                        onPress={() => {
-                          // TODO: Connect sarcasm level to user settings store.
-                          setSarcasmLevel(level);
-                        }}
+                        onPress={() => setSarcasmLevel(level)}
                       />
                     </View>
                   ))}
@@ -207,12 +182,9 @@ export default function SettingsScreen({ navigation }: Props) {
                     <View key={level} style={s.toneChipCellFlex}>
                       <SettingsPillOption
                         label={SARCASM_LABEL[level]}
-                        selected={sarcasmLevel === level}
+                        selected={settings.sarcasmLevel === level}
                         fillCell
-                        onPress={() => {
-                          // TODO: Connect sarcasm level to user settings store.
-                          setSarcasmLevel(level);
-                        }}
+                        onPress={() => setSarcasmLevel(level)}
                       />
                     </View>
                   ))}
@@ -220,42 +192,41 @@ export default function SettingsScreen({ navigation }: Props) {
               </View>
             </View>
             <View style={[s.hintBox, s.toneHintBox, { borderTopColor: c.border, paddingHorizontal: sp.lg }]}>
-              <Text style={[s.toneDescTitle, { color: c.text }]}>{SARCASM_LABEL[sarcasmLevel]}</Text>
-              <Text style={[s.toneDescBody, { color: c.textSoft }]}>{SARCASM_DETAIL[sarcasmLevel].tagline}</Text>
+              <Text style={[s.toneDescTitle, { color: c.text }]}>
+                {SARCASM_LABEL[settings.sarcasmLevel]}
+              </Text>
+              <Text style={[s.toneDescBody, { color: c.textSoft }]}>
+                {SARCASM_DETAIL[settings.sarcasmLevel].tagline}
+              </Text>
               <Text style={[s.toneDescExample, { color: c.textMuted }]}>
-                Example: {SARCASM_DETAIL[sarcasmLevel].example}
+                Example: {SARCASM_DETAIL[settings.sarcasmLevel].example}
               </Text>
             </View>
           </SettingsSection>
 
-          {/* TODO: Allow each task to override the global reminder frequency. */}
-          {/* TODO: Partner Only — no fallback app reminders in Together Mode; honor Partner reactions pop-up toggle for quiet feed. */}
+          {/* ── Reminder Frequency section ──────────────────────────── */}
           <SettingsSection
             title="Reminder Frequency"
-            description="How often the app should remind you about tasks (placeholder only)."
+            description="In-app nudges only — not phone push."
             titleTrailing={
-              <SettingsInfoIcon hintTitle="Reminder Frequency" hintBody={REMINDER_FREQUENCY_INFO_BODY} />
+              <SettingsInfoIcon
+                hintTitle="Reminder Frequency"
+                hintBody={REMINDER_FREQUENCY_INFO}
+              />
             }>
-            {REMINDER_META.map((row, index) => {
-              const showDivider = index < REMINDER_META.length - 1;
-              return (
-                <SettingsOptionRow
-                  key={row.id}
-                  title={row.title}
-                  description={row.description}
-                  selected={reminderPreset === row.id}
-                  onPress={() => setReminderPreset(row.id)}
-                  showDivider={showDivider}
-                />
-              );
-            })}
-            <View style={[s.reminderSectionFooter, { borderTopColor: c.border, padding: sp.lg }]}>
-              <Text style={[s.reminderSectionFooterText, { color: c.textSoft }]}>
-                Placeholder only — not saved yet.
-              </Text>
-            </View>
+            {REMINDER_META.map((row, index) => (
+              <SettingsOptionRow
+                key={row.id}
+                title={row.title}
+                description={row.description}
+                selected={settings.reminderPreset === row.id}
+                onPress={() => setReminderPreset(row.id)}
+                showDivider={index < REMINDER_META.length - 1}
+              />
+            ))}
           </SettingsSection>
 
+          {/* ── Sign out ────────────────────────────────────────────── */}
           <View style={[s.accountBlock, { paddingHorizontal: sp.gutter }]}>
             <TouchableOpacity
               style={[s.signOutBtn, { borderColor: c.border, backgroundColor: c.surface }]}
@@ -265,24 +236,12 @@ export default function SettingsScreen({ navigation }: Props) {
               <Text style={[s.signOutLabel, { color: c.danger }]}>Sign out</Text>
             </TouchableOpacity>
           </View>
-
-          <Text style={[s.devNote, { color: c.textDim }]}>
-            Preview-only controls are not saved. TODO: Restore a dedicated entry for task time presets if
-            we do not surface them in add-task flows.
-          </Text>
         </ScrollView>
 
         {showScrollTop ? (
           <TouchableOpacity
-            style={[
-              s.scrollTopFab,
-              {
-                backgroundColor: c.primary,
-                shadowColor: c.shadow,
-                borderColor: c.borderStrong,
-              },
-            ]}
-            onPress={scrollToTop}
+            style={[s.scrollTopFab, { backgroundColor: c.primary, shadowColor: c.shadow, borderColor: c.borderStrong }]}
+            onPress={() => scrollRef.current?.scrollTo({ y: 0, animated: true })}
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel="Scroll to top">
@@ -294,55 +253,26 @@ export default function SettingsScreen({ navigation }: Props) {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 function buildStyles(thm: AppTheme) {
   const { spacing: sp } = thm;
   return StyleSheet.create({
     scrollView: { flex: 1 },
     scrollContent: { paddingTop: sp.sm },
-    pageIntro: {
-      fontSize: 14,
-      lineHeight: 20,
-      paddingHorizontal: sp.gutter,
-      marginBottom: sp.lg,
-    },
-    notificationsHelper: {
-      paddingHorizontal: sp.lg,
-      paddingTop: sp.md,
-      paddingBottom: sp.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    notificationsHelperText: {
-      fontSize: 13,
-      lineHeight: 19,
-    },
     toneStrip: {},
-    toneTwoRows: {
-      alignSelf: 'stretch',
-    },
+    toneTwoRows: { alignSelf: 'stretch' },
     toneChipRow: {
       flexDirection: 'row',
       alignItems: 'stretch',
       alignSelf: 'stretch',
     },
-    toneChipCellFlex: {
-      flex: 1,
-      minWidth: 0,
-    },
-    hintBox: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-    },
-    toneHintBox: {
-      paddingTop: sp.lg,
-      paddingBottom: sp.md,
-    },
-    /** Match SettingsRow title / description rhythm. */
+    toneChipCellFlex: { flex: 1, minWidth: 0 },
+    hintBox: { borderTopWidth: StyleSheet.hairlineWidth },
+    toneHintBox: { paddingTop: sp.lg, paddingBottom: sp.md },
     toneDescTitle: { fontSize: 16, fontWeight: '600', marginBottom: sp.xs },
     toneDescBody: { fontSize: 13, lineHeight: 18, marginBottom: sp.md },
     toneDescExample: { fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
-    reminderSectionFooter: {
-      borderTopWidth: StyleSheet.hairlineWidth,
-    },
-    reminderSectionFooterText: { fontSize: 12, lineHeight: 17 },
     accountBlock: { marginTop: sp.md, marginBottom: sp.sm },
     signOutBtn: {
       borderRadius: thm.radius.md,
@@ -351,12 +281,6 @@ function buildStyles(thm: AppTheme) {
       alignItems: 'center',
     },
     signOutLabel: { fontSize: 16, fontWeight: '600' },
-    devNote: {
-      fontSize: 12,
-      textAlign: 'center',
-      paddingHorizontal: sp.gutter,
-      marginTop: sp.sm,
-    },
     scrollTopFab: {
       position: 'absolute',
       right: sp.gutter,

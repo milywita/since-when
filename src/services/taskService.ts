@@ -1,5 +1,6 @@
 import firestore from '@react-native-firebase/firestore';
 import type { Task } from '../types/Task';
+import type { ReminderPreset } from '../types/settingsPreferences';
 
 const tasksCollection = (userId: string) =>
   firestore().collection('users').doc(userId).collection('tasks');
@@ -29,7 +30,7 @@ export async function addTask(
   title: string,
   estimatedMs: number | null,
   activeTaskCount: number,
-  options?: { isPublic?: boolean },
+  options?: { isPublic?: boolean; reminderPreset?: ReminderPreset },
 ): Promise<void> {
   const col = tasksCollection(userId);
   // Find the highest existing position across all tasks (no where clause = no composite index needed).
@@ -59,6 +60,8 @@ export async function addTask(
     accumulatedSeconds: 0,
     // If this is the very first active task it immediately becomes #1 — start its timer.
     timerStartedAt: isFirst ? Date.now() : null,
+    // Only store when explicitly overriding; undefined omits the field from Firestore.
+    ...(options?.reminderPreset ? { reminderPreset: options.reminderPreset } : {}),
   };
   await ref.set(task);
 }
@@ -144,9 +147,22 @@ export async function completeTask(
 export async function updateTask(
   userId: string,
   taskId: string,
-  changes: { title?: string; estimatedMs?: number | null; isPublic?: boolean },
+  changes: {
+    title?: string;
+    estimatedMs?: number | null;
+    isPublic?: boolean;
+    reminderPreset?: ReminderPreset | null;
+  },
 ): Promise<void> {
-  await tasksCollection(userId).doc(taskId).update(changes);
+  // When reminderPreset is explicitly null, delete the field (revert to global default).
+  const { reminderPreset, ...rest } = changes;
+  const update: Record<string, unknown> = { ...rest };
+  if (reminderPreset === null) {
+    update.reminderPreset = firestore.FieldValue.delete();
+  } else if (reminderPreset !== undefined) {
+    update.reminderPreset = reminderPreset;
+  }
+  await tasksCollection(userId).doc(taskId).update(update);
 }
 
 /** Pin a non-#1 task as co-active. Starts its timer immediately. */

@@ -10,7 +10,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
   Animated,
   ScrollView,
   Share,
@@ -44,7 +43,11 @@ import {
   scheduleSessionTimerNotification,
   cancelSessionTimerNotification,
   showSessionTimerNotificationNow,
+  showPartnerReactionNotification,
+  showJoinRequestNotification,
 } from '../services/notificationService';
+import { useUserSettings } from '../context/UserSettingsContext';
+import { useActivityCenter } from '../context/ActivityCenterContext';
 import { TaskReactions } from '../components/session/TaskReactions';
 import { SwipeableRow } from '../components/SwipeableRow';
 import { formatElapsed } from '../utils/formatElapsed';
@@ -52,6 +55,7 @@ import { presetChipLabelFromMs } from '../utils/taskEstimatePresetLabel';
 import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
 import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
 import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
+import { TimerEstimateBlock } from '../components/tasks/TimerEstimateBlock';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -192,6 +196,9 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
   const [busy, setBusy] = useState(false);
   const [customModalVisible, setCustomModalVisible] = useState(false);
   const [customInput, setCustomInput] = useState('');
+  // Inline confirm states replace Alert.alert with themed UI
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   async function handleExtend(ms: number) {
     setBusy(true);
@@ -218,9 +225,43 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
 
   return (
     <View style={s.extendOverlay}>
-      <View style={s.extendCard}>
+      <View style={[s.extendCard, insets.bottom > 0 ? { paddingBottom: insets.bottom + 8 } : {}]}>
         <Text style={[s.extendTitle, { color: c.text }]}>Time's up.</Text>
-        {isHost ? (
+
+        {/* ── Confirm end/leave sub-view ─────────────────────────────── */}
+        {(confirmEnd || confirmLeave) ? (
+          <View style={[s.confirmBox, { borderColor: c.borderStrong, backgroundColor: c.surface }]}>
+            <Text style={[s.confirmQuestion, { color: c.text }]}>
+              {confirmEnd ? 'End for everyone?' : 'Leave the session?'}
+            </Text>
+            <Text style={[s.confirmBody, { color: c.textSoft }]}>
+              {confirmEnd
+                ? 'This will end the Together session for all participants.'
+                : 'You can rejoin later if the session is still active.'}
+            </Text>
+            <View style={s.confirmBtns}>
+              <TouchableOpacity
+                style={[s.confirmCancelBtn, { borderColor: c.border }]}
+                onPress={() => { setConfirmEnd(false); setConfirmLeave(false); }}>
+                <Text style={[s.confirmCancelText, { color: c.textSoft }]}>
+                  {confirmEnd ? 'Keep going' : 'Stay'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.confirmDestructiveBtn, { backgroundColor: c.danger }]}
+                onPress={() => {
+                  setConfirmEnd(false);
+                  setConfirmLeave(false);
+                  if (confirmEnd) { handleEnd(); } else { onLeave?.(); }
+                }}
+                disabled={busy}>
+                {busy
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.confirmDestructiveText}>{confirmEnd ? 'End session' : 'Leave'}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : isHost ? (
           <>
             <Text style={[s.extendSubtitle, { color: c.textSoft }]}>Keep going or call it done?</Text>
             <View style={s.extendBtns}>
@@ -240,20 +281,12 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
                 <Text style={s.extendChipText}>Custom</Text>
               </TouchableOpacity>
             </View>
+            {/* Destructive "End session" — clear border + danger colour */}
             <TouchableOpacity
-              style={[s.extendEndBtn, busy && s.extendChipDisabled]}
-              onPress={() =>
-                Alert.alert(
-                  'End session?',
-                  'This will end the session for everyone.',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'End', style: 'destructive', onPress: handleEnd },
-                  ],
-                )
-              }
+              style={[s.extendEndBtn, { borderColor: c.danger }, busy && s.extendChipDisabled]}
+              onPress={() => setConfirmEnd(true)}
               disabled={busy}>
-              <Text style={[s.extendEndBtnText, { color: c.textSoft }]}>End session</Text>
+              <Text style={[s.extendEndBtnText, { color: c.danger }]}>End session</Text>
             </TouchableOpacity>
 
             <Modal
@@ -309,18 +342,9 @@ function ExtendOverlay({ isHost, hostName, onExtend, onCustomExtend, onEnd, onLe
               Waiting for {hostName} to extend or end the session…
             </Text>
             <TouchableOpacity
-              style={s.extendEndBtn}
-              onPress={() =>
-                Alert.alert(
-                  'Leave session?',
-                  'You can rejoin later if the session is still active.',
-                  [
-                    { text: 'Stay', style: 'cancel' },
-                    { text: 'Leave', style: 'destructive', onPress: onLeave },
-                  ],
-                )
-              }>
-              <Text style={[s.extendEndBtnText, { color: c.textSoft }]}>Leave session</Text>
+              style={[s.extendEndBtn, { borderColor: c.danger }]}
+              onPress={() => setConfirmLeave(true)}>
+              <Text style={[s.extendEndBtnText, { color: c.danger }]}>Leave session</Text>
             </TouchableOpacity>
           </>
         )}
@@ -419,33 +443,41 @@ function SessionQueueTaskRow({
 
         {isTimerRunning ? (
           <View style={s.sqTimerRow}>
-            <Text
-              style={[
-                s.sqTimer,
-                {
-                  color: isOverEstimate
-                    ? c.danger
-                    : isFocusedRow
-                      ? c.accent
-                      : c.textMuted,
-                },
-              ]}>
-              {formatSeconds(liveSeconds)}
-            </Text>
-            {estimatedSec !== null && (
-              <Text style={[s.sqEstimate, { color: isOverEstimate ? c.dangerMuted : c.textSoft }]}>
-                {isOverEstimate
-                  ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
-                  : `est. ${formatSeconds(estimatedSec)}`}
-              </Text>
-            )}
+            <TimerEstimateBlock
+              elapsedLabel={formatSeconds(liveSeconds)}
+              secondaryLabel={
+                estimatedSec !== null
+                  ? isOverEstimate
+                    ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                    : `est. ${formatSeconds(estimatedSec)}`
+                  : null
+              }
+              isOverEstimate={Boolean(isOverEstimate && estimatedSec !== null)}
+              density="sessionSq"
+              elapsedColor={
+                isOverEstimate ? c.danger : isFocusedRow ? c.accent : c.textMuted
+              }
+              secondaryMutedColor={isOverEstimate ? c.dangerMuted : c.textSoft}
+              overdueSecondaryColor={c.dangerMuted}
+            />
           </View>
         ) : hasFocusTime ? (
           <View style={s.sqTimerRow}>
-            <Text style={[s.sqTimer, { color: c.textMuted }]}>{formatSeconds(liveSeconds)}</Text>
-            {estimatedSec !== null && (
-              <Text style={[s.sqEstimate, { color: c.textSoft }]}>est. {formatSeconds(estimatedSec)}</Text>
-            )}
+            <TimerEstimateBlock
+              elapsedLabel={formatSeconds(liveSeconds)}
+              secondaryLabel={
+                estimatedSec !== null
+                  ? isOverEstimate
+                    ? `over by ${formatSeconds(liveSeconds - estimatedSec)}`
+                    : `est. ${formatSeconds(estimatedSec)}`
+                  : null
+              }
+              isOverEstimate={Boolean(isOverEstimate && estimatedSec !== null)}
+              density="sessionSq"
+              elapsedColor={c.textMuted}
+              secondaryMutedColor={isOverEstimate ? c.dangerMuted : c.textSoft}
+              overdueSecondaryColor={c.dangerMuted}
+            />
           </View>
         ) : (
           <View style={s.sqTimerRow}>
@@ -642,6 +674,10 @@ export default function SessionScreen({ route, navigation }: Props) {
     finalizeSession,
   } = useSession(sessionId);
 
+  const { settings: userSettings } = useUserSettings();
+  const inAppSilent = userSettings.reminderPreset === 'silent';
+  const { addActivity } = useActivityCenter();
+
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -654,6 +690,10 @@ export default function SessionScreen({ route, navigation }: Props) {
     taskId: string;
     completed: boolean;
   } | null>(null);
+  // Themed confirm modals replacing Alert.alert for end/leave actions
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const currentUser = auth().currentUser;
@@ -665,10 +705,28 @@ export default function SessionScreen({ route, navigation }: Props) {
 
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [handlingRequest, setHandlingRequest] = useState(false);
+  const prevJoinRequestIdsRef = useRef<Set<string>>(new Set());
+  const joinRequestsBootstrapped = useRef(false);
+
   useEffect(() => {
     if (!isHost || !sessionId) { return; }
-    const unsub = subscribeToJoinRequests(sessionId, setJoinRequests);
+    const unsub = subscribeToJoinRequests(sessionId, incoming => {
+      if (!joinRequestsBootstrapped.current) {
+        prevJoinRequestIdsRef.current = new Set(incoming.map(r => r.id));
+        joinRequestsBootstrapped.current = true;
+        setJoinRequests(incoming);
+        return;
+      }
+      const freshRequests = incoming.filter(r => !prevJoinRequestIdsRef.current.has(r.id));
+      if (freshRequests.length > 0) {
+        const first = freshRequests[0];
+        showJoinRequestNotification(first.displayName).catch(console.error);
+      }
+      prevJoinRequestIdsRef.current = new Set(incoming.map(r => r.id));
+      setJoinRequests(incoming);
+    });
     return unsub;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHost, sessionId]);
 
   const pendingRequest = joinRequests[0] ?? null;
@@ -679,7 +737,7 @@ export default function SessionScreen({ route, navigation }: Props) {
       await approveJoinRequest(sessionId, req.id, req.userId);
       flash(`${req.displayName} is in!`);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not approve request.');
+      flash(`Could not approve: ${e?.message ?? 'unknown error'}`);
     } finally {
       setHandlingRequest(false);
     }
@@ -690,7 +748,7 @@ export default function SessionScreen({ route, navigation }: Props) {
     try {
       await denyJoinRequest(sessionId, req.id);
     } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not deny request.');
+      flash(`Could not deny: ${e?.message ?? 'unknown error'}`);
     } finally {
       setHandlingRequest(false);
     }
@@ -734,11 +792,34 @@ export default function SessionScreen({ route, navigation }: Props) {
     if (fresh.length > 0) {
       const r = fresh[0];
       const senderName = members.find(m => m.userId === r.fromUserId)?.displayName ?? 'Someone';
-      const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title;
-      flash(`${senderName}: "${r.text}"${taskTitle ? ` on "${taskTitle}"` : ''}`);
+      const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title ?? 'your task';
+      if (!inAppSilent) {
+        flash(`${senderName}: "${r.text}"${taskTitle !== 'your task' ? ` on "${taskTitle}"` : ''}`);
+      }
+
+      // Persist the reaction in the activity center (survives session end / app close)
+      addActivity({
+        type: 'reaction',
+        fromDisplayName: senderName,
+        taskTitle,
+        text: r.text,
+        sentAt: r.sentAt,
+        sessionId,
+      });
+
+      // Push notification when partner reactions push is enabled
+      if (userSettings.partnerReactionPushEnabled) {
+        showPartnerReactionNotification({
+          fromDisplayName: senderName,
+          reactionText: r.text,
+          taskTitle,
+        }).catch(console.error);
+      }
     }
     prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
-  }, [reactions, loading, userId, members, myMember, flash]);
+  // addActivity and userSettings are stable refs captured at call time — OK to exclude
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reactions, loading, userId, members, myMember, flash, sessionId]);
 
   const myActiveTasks = (myMember?.tasks.filter(t => t.completedAt === null) ?? [])
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
@@ -834,7 +915,9 @@ export default function SessionScreen({ route, navigation }: Props) {
     await completeTask(task);
     const focusSecs = task.accumulatedSeconds ?? 0;
     const focusMs = focusSecs > 0 ? focusSecs * 1000 : null;
-    flash(`Done! "${task.title}"${focusMs ? ` in ${formatElapsed(focusMs)}` : ''}`);
+    if (!inAppSilent) {
+      flash(`Done! "${task.title}"${focusMs ? ` in ${formatElapsed(focusMs)}` : ''}`);
+    }
   }
 
   async function handleRemoveTask(task: SessionTask) {
@@ -920,30 +1003,15 @@ export default function SessionScreen({ route, navigation }: Props) {
           )}
           {isHost && !timerExpired && (
             <TouchableOpacity
-              style={s.endBtn}
-              onPress={() =>
-                Alert.alert('End session?', 'This will end the session for everyone.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'End', style: 'destructive', onPress: () =>
-                      endSession().catch((err: any) =>
-                        Alert.alert('Error', err?.message ?? 'Could not end session.'),
-                      ),
-                  },
-                ])
-              }>
-              <Text style={[s.endBtnText, { color: c.textSoft }]}>End</Text>
+              style={[s.endBtn, { borderColor: c.danger }]}
+              onPress={() => setShowEndConfirm(true)}>
+              <Text style={[s.endBtnText, { color: c.danger }]}>End</Text>
             </TouchableOpacity>
           )}
           {!isHost && (
             <TouchableOpacity
               style={s.leaveBtn}
-              onPress={() =>
-                Alert.alert('Leave session?', 'You can rejoin later using the host\'s invite code.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Leave', style: 'destructive', onPress: handleLeave },
-                ])
-              }>
+              onPress={() => setShowLeaveConfirm(true)}>
               <Text style={[s.leaveBtnText, { color: c.danger }]}>Leave</Text>
             </TouchableOpacity>
           )}
@@ -963,6 +1031,91 @@ export default function SessionScreen({ route, navigation }: Props) {
           s={s}
         />
       )}
+
+      {/* ── Themed confirm modal for "End session" (header button) ── */}
+      <Modal
+        visible={showEndConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowEndConfirm(false)}>
+        <View style={s.confirmModalBackdrop}>
+          <View style={[s.confirmModalCard, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+            <Text style={[s.confirmModalTitle, { color: c.text }]}>End session?</Text>
+            <Text style={[s.confirmModalBody, { color: c.textSoft }]}>
+              This will end the Together session for all participants.
+            </Text>
+            <View style={s.confirmModalBtns}>
+              <TouchableOpacity
+                style={[s.confirmModalCancel, { borderColor: c.border }]}
+                onPress={() => setShowEndConfirm(false)}
+                disabled={confirmBusy}>
+                <Text style={[s.confirmModalCancelText, { color: c.textSoft }]}>Keep going</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.confirmModalDestructive, { backgroundColor: c.danger }]}
+                onPress={async () => {
+                  setConfirmBusy(true);
+                  try {
+                    await endSession();
+                    setShowEndConfirm(false);
+                  } catch (err: any) {
+                    setShowEndConfirm(false);
+                    flash(err?.message ?? 'Could not end session.');
+                  } finally {
+                    setConfirmBusy(false);
+                  }
+                }}
+                disabled={confirmBusy}>
+                {confirmBusy
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.confirmModalDestructiveText}>End session</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Themed confirm modal for "Leave session" (header button) ── */}
+      <Modal
+        visible={showLeaveConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowLeaveConfirm(false)}>
+        <View style={s.confirmModalBackdrop}>
+          <View style={[s.confirmModalCard, { backgroundColor: c.surfaceRaised, borderColor: c.border }]}>
+            <Text style={[s.confirmModalTitle, { color: c.text }]}>Leave session?</Text>
+            <Text style={[s.confirmModalBody, { color: c.textSoft }]}>
+              You can rejoin later using the host's invite code.
+            </Text>
+            <View style={s.confirmModalBtns}>
+              <TouchableOpacity
+                style={[s.confirmModalCancel, { borderColor: c.border }]}
+                onPress={() => setShowLeaveConfirm(false)}
+                disabled={confirmBusy}>
+                <Text style={[s.confirmModalCancelText, { color: c.textSoft }]}>Stay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.confirmModalDestructive, { backgroundColor: c.danger }]}
+                onPress={async () => {
+                  setConfirmBusy(true);
+                  try {
+                    await handleLeave();
+                    setShowLeaveConfirm(false);
+                  } catch {
+                    setShowLeaveConfirm(false);
+                  } finally {
+                    setConfirmBusy(false);
+                  }
+                }}
+                disabled={confirmBusy}>
+                {confirmBusy
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.confirmModalDestructiveText}>Leave</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <ScrollView
         style={s.scroll}
@@ -1275,8 +1428,7 @@ function buildStyles(thm: AppTheme) {
     sqBadgeText: { fontSize: 13, fontWeight: '700' },
     sqContent: { flex: 1, paddingVertical: 12, paddingRight: 6, gap: 3 },
     sqTitle: { fontSize: 15, fontWeight: '500', lineHeight: 20 },
-    sqTimerRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' },
-    sqTimer: { fontSize: 12, fontWeight: '500', fontVariant: ['tabular-nums' as const] },
+    sqTimerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
     sqEstimate: { fontSize: 11, fontVariant: ['tabular-nums' as const] },
     sqMeta: { fontSize: 12 },
     sqRowActions: {
@@ -1369,7 +1521,50 @@ function buildStyles(thm: AppTheme) {
       borderColor: c.border, paddingVertical: sp.md, alignItems: 'center', marginTop: sp.xs,
       width: '100%',
     },
-    extendEndBtnText: { fontSize: 14 },
+    extendEndBtnText: { fontSize: 14, fontWeight: '600' },
+
+    // Inline confirm sub-view inside the extend overlay card
+    confirmBox: {
+      width: '100%', borderRadius: r.md, borderWidth: 1,
+      padding: sp.lg, gap: sp.sm, marginTop: sp.xs,
+    },
+    confirmQuestion: { fontSize: 16, fontWeight: '700' },
+    confirmBody: { fontSize: 13, lineHeight: 19 },
+    confirmBtns: { flexDirection: 'row', gap: sp.sm, marginTop: sp.xs },
+    confirmCancelBtn: {
+      flex: 1, borderRadius: r.sm, borderWidth: 1,
+      paddingVertical: 10, alignItems: 'center',
+    },
+    confirmCancelText: { fontSize: 14, fontWeight: '500' },
+    confirmDestructiveBtn: {
+      flex: 1, borderRadius: r.sm,
+      paddingVertical: 10, alignItems: 'center',
+    },
+    confirmDestructiveText: { fontSize: 14, fontWeight: '600', color: '#ffffff' },
+
+    // Full-screen confirm modals (End / Leave from header)
+    confirmModalBackdrop: {
+      flex: 1, backgroundColor: 'rgba(0,0,0,0.52)',
+      justifyContent: 'center', alignItems: 'center', paddingHorizontal: sp.xl,
+    },
+    confirmModalCard: {
+      width: '100%', maxWidth: 340,
+      borderRadius: r.lg, borderWidth: 1,
+      padding: sp.xl, gap: sp.md,
+    },
+    confirmModalTitle: { fontSize: 18, fontWeight: '700' },
+    confirmModalBody: { fontSize: 14, lineHeight: 20 },
+    confirmModalBtns: { flexDirection: 'row', gap: sp.sm, marginTop: sp.xs },
+    confirmModalCancel: {
+      flex: 1, borderRadius: r.sm, borderWidth: 1,
+      paddingVertical: 12, alignItems: 'center',
+    },
+    confirmModalCancelText: { fontSize: 15, fontWeight: '500' },
+    confirmModalDestructive: {
+      flex: 1, borderRadius: r.sm,
+      paddingVertical: 12, alignItems: 'center',
+    },
+    confirmModalDestructiveText: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
 
     // Floating popup card (same style as HomeScreen)
     popupHost: {

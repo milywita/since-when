@@ -10,6 +10,7 @@ import {
 import type { Task } from '../../types/Task';
 import { useTheme } from '../../theme/ThemeContext';
 import { formatElapsed } from '../../utils/formatElapsed';
+import { TimerEstimateBlock } from './TimerEstimateBlock';
 
 export type TaskCardProps = {
   task: Task;
@@ -57,17 +58,21 @@ export function TaskCard({ task, now, onComplete, onDelete, onEdit, style }: Tas
           {task.title}
         </Text>
         <View style={styles.cardMeta}>
-          <Text style={[styles.cardTimer, { color: (isOld || overEstimate) ? c.danger : c.textMuted }]}>
-            {formatElapsed(elapsed)}
-          </Text>
-          {task.estimatedMs !== null && (
-            <Text style={[styles.cardEstimate, { color: overEstimate ? c.dangerMuted : c.textSoft }]}>
-              {overEstimate ? '— over by ' : '— est. '}
-              {overEstimate
-                ? formatElapsed(elapsed - task.estimatedMs)
-                : formatElapsed(task.estimatedMs)}
-            </Text>
-          )}
+          <TimerEstimateBlock
+            elapsedLabel={formatElapsed(elapsed)}
+            secondaryLabel={
+              task.estimatedMs !== null
+                ? overEstimate
+                  ? `over by ${formatElapsed(elapsed - task.estimatedMs)}`
+                  : `est. ${formatElapsed(task.estimatedMs)}`
+                : null
+            }
+            isOverEstimate={Boolean(overEstimate && task.estimatedMs !== null)}
+            density="queue"
+            elapsedColor={isOld || overEstimate ? c.danger : c.textMuted}
+            secondaryMutedColor={overEstimate ? c.dangerMuted : c.textSoft}
+            overdueSecondaryColor={c.dangerMuted}
+          />
         </View>
       </View>
       <View style={[styles.cardActions, { gap: sp.sm }]}>
@@ -101,12 +106,9 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '500' },
   cardMeta: {
     flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
+    alignItems: 'flex-start',
     gap: 6,
   },
-  cardTimer: { fontSize: 13, fontVariant: ['tabular-nums'] },
-  cardEstimate: { fontSize: 12, fontVariant: ['tabular-nums'] },
   cardActions: { flexDirection: 'row', alignItems: 'center' },
   editBtn: {
     borderRadius: 8,
