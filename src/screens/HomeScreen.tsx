@@ -663,6 +663,7 @@ export default function HomeScreen({ navigation }: Props) {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [actionSheetTask, setActionSheetTask] = useState<Task | null>(null);
   const [tab, setTab] = useState<ActiveTab>('active');
+  const [showReminderPreview, setShowReminderPreview] = useState(false);
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
 
@@ -803,6 +804,13 @@ export default function HomeScreen({ navigation }: Props) {
               {isDark
                 ? <SunIcon color={c.accentMuted} />
                 : <MoonIcon color={c.accent} bgColor={c.background} />}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.settingsIconBtn, showReminderPreview && { backgroundColor: c.accentSurface }]}
+              onPress={() => setShowReminderPreview(v => !v)}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle reminder preview">
+              <TestTubeIcon color={showReminderPreview ? c.accent : c.accentMuted} />
             </TouchableOpacity>
             <TouchableOpacity
               style={s.settingsIconBtn}
@@ -994,26 +1002,28 @@ export default function HomeScreen({ navigation }: Props) {
       </View>
 
       {/* ── Reminder preview bar (dev / showcase) ─── */}
-      <View style={[s.reminderPreviewBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-        <Text style={[s.reminderPreviewTitle, { color: c.textMuted }]}>🔔 PREVIEW REMINDERS</Text>
-        <View style={s.reminderPreviewChips}>
-          {SARCASM_TONES.map(tone => (
-            <TouchableOpacity
-              key={tone}
-              style={[s.reminderPreviewChip, { backgroundColor: c.surface, borderColor: c.border }]}
-              onPress={() => handlePreviewReminder(tone).catch(console.error)}
-              activeOpacity={0.65}>
-              <Text style={s.reminderPreviewChipEmoji}>{TONE_EMOJI[tone]}</Text>
-              <Text style={[s.reminderPreviewChipText, { color: c.text }]}>{TONE_SHORT[tone]}</Text>
-            </TouchableOpacity>
-          ))}
+      {showReminderPreview && (
+        <View style={[s.reminderPreviewBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <Text style={[s.reminderPreviewTitle, { color: c.textMuted }]}>🔔 PREVIEW REMINDERS</Text>
+          <View style={s.reminderPreviewChips}>
+            {SARCASM_TONES.map(tone => (
+              <TouchableOpacity
+                key={tone}
+                style={[s.reminderPreviewChip, { backgroundColor: c.surface, borderColor: c.border }]}
+                onPress={() => handlePreviewReminder(tone).catch(console.error)}
+                activeOpacity={0.65}>
+                <Text style={s.reminderPreviewChipEmoji}>{TONE_EMOJI[tone]}</Text>
+                <Text style={[s.reminderPreviewChipText, { color: c.text }]}>{TONE_SHORT[tone]}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── FAB ──────────────────────────────────────── */}
       {tab === 'active' && (
         <TouchableOpacity
-          style={[s.fab, { bottom: Math.max(insets.bottom, 8) + 96 }]}
+          style={[s.fab, showReminderPreview && { bottom: Math.max(insets.bottom, 8) + 96 }]}
           onPress={() => setModalVisible(true)}>
           <Text style={[s.fabText, { color: c.primaryText }]}>+</Text>
         </TouchableOpacity>
@@ -1084,6 +1094,23 @@ export default function HomeScreen({ navigation }: Props) {
 
 // ─── Theme toggle icons ────────────────────────────────────────────────────────
 
+/**
+ * TestTube: narrow neck + wider rounded bulb + a small bubble dot inside,
+ * all drawn with solid coloured Views — matches Sun/Moon icon style.
+ */
+function TestTubeIcon({ color }: { color: string }) {
+  return (
+    <View style={themeIconStyles.wrap}>
+      {/* neck */}
+      <View style={[themeIconStyles.tubeNeck, { backgroundColor: color }]} />
+      {/* bulb body */}
+      <View style={[themeIconStyles.tubeBulb, { backgroundColor: color }]} />
+      {/* bubble highlight inside bulb */}
+      <View style={[themeIconStyles.tubeBubble, { backgroundColor: color, opacity: 0.35 }]} />
+    </View>
+  );
+}
+
 /** Sun: small filled circle + 4 thin rays through it */
 function SunIcon({ color }: { color: string }) {
   return (
@@ -1136,6 +1163,32 @@ const themeIconStyles = StyleSheet.create({
     borderRadius: 5,
     top: 1,
     right: 1,
+  },
+  // TestTube
+  tubeNeck: {
+    position: 'absolute',
+    top: 0,
+    left: 7,
+    width: 4,
+    height: 9,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+  },
+  tubeBulb: {
+    position: 'absolute',
+    bottom: 0,
+    left: 2,
+    width: 14,
+    height: 11,
+    borderRadius: 6,
+  },
+  tubeBubble: {
+    position: 'absolute',
+    bottom: 3,
+    right: 4,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
   },
 });
 
