@@ -52,9 +52,10 @@ type ContextValue = {
   unreadCount: number;
   /**
    * Add a new reaction to the feed. Duplicates (same id) are silently ignored.
+   * Returns true if the item was newly inserted, false if it was a duplicate.
    * The list is capped at 10 items (newest first).
    */
-  addActivity: (item: Omit<ActivityItem, 'id'>) => void;
+  addActivity: (item: Omit<ActivityItem, 'id'>) => boolean;
   markAllRead: () => void;
   ready: boolean;
 };
@@ -62,7 +63,7 @@ type ContextValue = {
 const ActivityCenterContext = createContext<ContextValue>({
   items: [],
   unreadCount: 0,
-  addActivity: () => {},
+  addActivity: () => false,
   markAllRead: () => {},
   ready: false,
 });
@@ -105,11 +106,12 @@ export function ActivityCenterProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addActivity = useCallback(
-    (raw: Omit<ActivityItem, 'id'>) => {
+    (raw: Omit<ActivityItem, 'id'>): boolean => {
       // Use message for the stable ID (message === reaction text, same as old `text`)
       const id = `${raw.sessionId}:${raw.sentAt}:${raw.message}`;
       if (seenIdsRef.current.has(id)) {
-        return;
+        // Already delivered — caller should not re-trigger popups
+        return false;
       }
       seenIdsRef.current.add(id);
       const newItem: ActivityItem = { ...raw, id };
@@ -118,6 +120,7 @@ export function ActivityCenterProvider({ children }: { children: ReactNode }) {
         persist(next, lastReadAtRef.current);
         return next;
       });
+      return true;
     },
     [persist],
   );

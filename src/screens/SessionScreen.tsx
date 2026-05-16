@@ -14,7 +14,6 @@ import {
   ScrollView,
   Share,
   Vibration,
-  AppState,
 } from 'react-native';
 import DraggableFlatList, { ScaleDecorator, type RenderItemParams } from 'react-native-draggable-flatlist';
 import auth from '@react-native-firebase/auth';
@@ -32,8 +31,6 @@ import {
 } from '../services/sessionService';
 import type { SessionMember, SessionTask, Reaction, JoinRequest } from '../types/Session';
 import {
-  REACTION_OPTIONS_ACTIVE,
-  REACTION_OPTIONS_COMPLETED,
   MAX_SESSION_TASKS,
   EXTEND_PRESETS,
 } from '../types/Session';
@@ -47,6 +44,7 @@ import {
   showSessionTimerNotificationNow,
   showPartnerReactionNotification,
   showJoinRequestNotification,
+  isAppForegrounded,
 } from '../services/notificationService';
 import { useUserSettings } from '../context/UserSettingsContext';
 import { useActivityCenter } from '../context/ActivityCenterContext';
@@ -59,6 +57,7 @@ import type { TaskEstimatePreset } from '../types/TaskEstimatePreset';
 import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
 import { TimerEstimateBlock } from '../components/tasks/TimerEstimateBlock';
 import { PartnerReactionModal } from '../components/session/PartnerReactionModal';
+import { ReactionPicker } from '../components/session/ReactionPicker';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -121,65 +120,6 @@ const SESSION_TASK_ESTIMATE_PRESETS: TaskEstimatePreset[] = SESSION_TIME_PRESET_
 type S = ReturnType<typeof buildStyles>;
 
 
-// ─── Reaction picker ──────────────────────────────────────────────────────────
-
-type ReactionPickerProps = {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (text: string) => Promise<void>;
-  canReact: boolean;
-  reactionCount: number;
-  isCompleted: boolean;
-  c: AppTheme['colors'];
-  s: S;
-};
-
-function ReactionPicker({ visible, onClose, onSelect, canReact, reactionCount, isCompleted, c, s }: ReactionPickerProps) {
-  const [sending, setSending] = useState(false);
-  const options = isCompleted ? REACTION_OPTIONS_COMPLETED : REACTION_OPTIONS_ACTIVE;
-  const title = isCompleted ? 'Celebrate the win' : 'Send a reaction';
-  const remaining = 3 - reactionCount;
-
-  async function handleSelect(text: string) {
-    setSending(true);
-    try { await onSelect(text); onClose(); } finally { setSending(false); }
-  }
-
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <TouchableOpacity style={s.popupBackdrop} activeOpacity={1} onPress={onClose} />
-      <View style={s.reactionSheet}>
-        {canReact ? (
-          <>
-            <Text style={[s.reactionTitle, { color: c.text }]}>{title}</Text>
-            <Text style={[s.reactionMeta, { color: c.textSoft }]}>
-              {remaining} {remaining === 1 ? 'reaction' : 'reactions'} left for this task
-            </Text>
-            <View style={s.reactionOptions}>
-              {options.map(opt => (
-                <TouchableOpacity
-                  key={opt}
-                  style={s.reactionBtn}
-                  onPress={() => handleSelect(opt)}
-                  disabled={sending}>
-                  <Text style={[s.reactionBtnText, { color: c.text }]}>{opt}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={[s.reactionTitle, { color: c.text }]}>Reaction limit reached</Text>
-            <Text style={[s.reactionMeta, { color: c.textSoft }]}>3 reactions per task per session.</Text>
-            <TouchableOpacity style={s.reactionCloseBtn} onPress={onClose}>
-              <Text style={[s.reactionCloseBtnText, { color: c.textSoft }]}>OK</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-    </Modal>
-  );
-}
 
 // ─── Extend timer overlay ─────────────────────────────────────────────────────
 
@@ -691,6 +631,9 @@ export default function SessionScreen({ route, navigation }: Props) {
     taskTitle: string;
     message: string;
   } | null>(null);
+  // Stable dismiss callback — prevents PartnerReactionModal from recreating its AppState
+  // listener and auto-dismiss timer on every parent render.
+  const dismissPartnerReactionModal = useCallback(() => setPartnerReactionModal(null), []);
   const [editingSessionTask, setEditingSessionTask] = useState<SessionTask | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [actionSheetTask, setActionSheetTask] = useState<SessionTask | null>(null);
@@ -804,8 +747,11 @@ export default function SessionScreen({ route, navigation }: Props) {
       const senderName = members.find(m => m.userId === r.fromUserId)?.displayName ?? 'Someone';
       const taskTitle = myMember?.tasks.find(t => t.taskId === r.taskId)?.title ?? 'your task';
 
-      // Always persist the reaction to the Activity Center
-      addActivity({
+      // Persist to Activity Center. Returns true only when genuinely new — addActivity
+      // deduplicates via seenIdsRef (loaded from AsyncStorage on app start), so stale
+      // reactions that were already delivered (e.g. after a session rejoin) return false
+      // and must NOT re-trigger popups or OS push.
+      const isNewReaction = addActivity({
         type: 'reaction',
         fromUserId: r.fromUserId,
         fromDisplayName: senderName,
@@ -817,18 +763,20 @@ export default function SessionScreen({ route, navigation }: Props) {
         sessionId,
       });
 
-      // Partner reaction display logic:
+      // Partner reaction display logic (only for genuinely new reactions):
+      // - Already seen (isNewReaction=false) → skip everything; reaction stays in Activity Center.
       // - Push disabled or silent mode → Activity Center only, no popup, no vibration.
       // - Push enabled + app in foreground → in-app modal + subtle vibration (no OS push).
       // - Push enabled + app in background → OS push notification (user can't see the modal).
-      if (!inAppSilent && userSettings.partnerReactionPushEnabled) {
-        if (AppState.currentState === 'active') {
+      if (isNewReaction && !inAppSilent && userSettings.partnerReactionPushEnabled) {
+        if (isAppForegrounded()) {
           // User is actively in the app: use the themed in-app popup + vibration.
           setPartnerReactionModal({ fromDisplayName: senderName, taskTitle, message: r.text });
           // Two short pulses: unobtrusive but noticeable (pattern: [wait,on,off,on] ms).
           Vibration.vibrate([0, 120, 80, 120]);
         } else {
           // App is backgrounded: escalate to OS push so the user sees the reaction.
+          // showPartnerReactionNotification also guards against foreground internally.
           showPartnerReactionNotification({
             fromDisplayName: senderName,
             reactionText: r.text,
@@ -836,7 +784,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           }).catch(console.error);
         }
       }
-      // When push disabled or silent: only Activity Center entry, nothing else.
+      // When push disabled, silent, or already seen: only Activity Center entry, nothing else.
     }
     prevIncomingReactionIdsRef.current = new Set(incoming.map(r => r.id));
   // addActivity and userSettings are stable refs captured at call time — OK to exclude
@@ -883,7 +831,15 @@ export default function SessionScreen({ route, navigation }: Props) {
     }
     if (timerExpired && !timerNotificationFiredRef.current) {
       timerNotificationFiredRef.current = true;
-      showSessionTimerNotificationNow().catch(console.error);
+      // Cancel the scheduled Notifee trigger before calling showSessionTimerNotificationNow.
+      // The trigger fires via the OS at endsAt regardless of app state; canceling it here
+      // (while JS is running) closes the race window where both the trigger and the
+      // immediate call would show a push simultaneously.
+      // showSessionTimerNotificationNow internally suppresses the push when the app is
+      // foregrounded, so no OS notification appears while the user can see the timer UI.
+      cancelSessionTimerNotification()
+        .then(() => showSessionTimerNotificationNow())
+        .catch(console.error);
     }
     if (!timerExpired) {
       timerNotificationFiredRef.current = false;
@@ -1064,7 +1020,7 @@ export default function SessionScreen({ route, navigation }: Props) {
           fromDisplayName={partnerReactionModal.fromDisplayName}
           taskTitle={partnerReactionModal.taskTitle}
           message={partnerReactionModal.message}
-          onDismiss={() => setPartnerReactionModal(null)}
+          onDismiss={dismissPartnerReactionModal}
         />
       )}
 
@@ -1338,7 +1294,8 @@ export default function SessionScreen({ route, navigation }: Props) {
             ? {
                 title: editingSessionTask.title,
                 estimatedMs: editingSessionTask.estimatedMs,
-                reminderPreset: SETTINGS_DEFAULTS.reminderPreset,
+                // Use the user's actual saved setting rather than the static default
+                reminderPreset: userSettings.reminderPreset,
                 togetherVisibility: SETTINGS_DEFAULTS.togetherVisibility,
               }
             : undefined
@@ -1353,9 +1310,6 @@ export default function SessionScreen({ route, navigation }: Props) {
           onSelect={handleSendReaction}
           canReact={canReact(reactionTarget.taskId)}
           reactionCount={myReactionCountForTask(reactionTarget.taskId)}
-          isCompleted={reactionTarget.completed}
-          c={c}
-          s={s}
         />
       )}
 
@@ -1616,14 +1570,10 @@ function buildStyles(thm: AppTheme) {
     },
     confirmModalDestructiveText: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
 
-    // Floating popup card (same style as HomeScreen)
+    // Floating popup card (legacy — kept for reference; TaskFormBottomSheet owns this now)
     popupHost: {
       flex: 1,
       justifyContent: 'flex-end',
-    },
-    popupBackdrop: {
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'transparent',
     },
     popupCard: {
       marginHorizontal: sp.lg,
@@ -1694,21 +1644,6 @@ function buildStyles(thm: AppTheme) {
     modalAddBtnText: { fontSize: 16, fontWeight: '600' },
     modalCloseBtn: { backgroundColor: c.surface, borderRadius: r.sm, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: c.border },
     modalCloseBtnText: { fontSize: 15, fontWeight: '500' },
-
-    // Reaction picker
-    reactionSheet: {
-      position: 'absolute', bottom: 0, left: 0, right: 0,
-      backgroundColor: c.surfaceRaised, borderTopLeftRadius: r.xl, borderTopRightRadius: r.xl,
-      paddingHorizontal: sp.xl, paddingBottom: Platform.OS === 'ios' ? 44 : 28,
-      paddingTop: sp.xl, borderWidth: 1, borderColor: c.border, gap: 10,
-    },
-    reactionTitle: { fontSize: 18, fontWeight: '600' },
-    reactionMeta: { fontSize: 13, marginBottom: sp.xs },
-    reactionOptions: { gap: sp.sm },
-    reactionBtn: { backgroundColor: c.surface, borderRadius: r.sm, paddingVertical: 13, paddingHorizontal: sp.lg, borderWidth: 1, borderColor: c.border },
-    reactionBtnText: { fontSize: 15, fontWeight: '500' },
-    reactionCloseBtn: { backgroundColor: c.surface, borderRadius: r.sm, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: c.border },
-    reactionCloseBtnText: { fontSize: 14 },
 
     // Join request popup
     joinPopupOverlay: { position: 'absolute', bottom: 100, left: sp.lg, right: sp.lg, zIndex: 200 },

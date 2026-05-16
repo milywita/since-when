@@ -1,15 +1,10 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Dimensions, AppState } from 'react-native';
 import Modal from 'react-native-modal';
 import { useTheme, useThemeToggle } from '../../theme/ThemeContext';
+import { POPUP_AUTO_DISMISS_REMINDER_MS } from '../../constants/reminderConfig';
 
 const SCREEN = Dimensions.get('window');
-
-/**
- * Auto-dismiss delay (ms) for the partner reaction popup.
- * Shorter than solo reminder (6 min) because reactions are transient.
- */
-const AUTO_DISMISS_MS = 7000;
 
 export type PartnerReactionModalProps = {
   visible: boolean;
@@ -32,20 +27,29 @@ export function PartnerReactionModal({
   const { colors: c, spacing: sp, radius: r } = useTheme();
   const { isDark } = useThemeToggle();
 
-  // Auto-dismiss after AUTO_DISMISS_MS when the modal becomes visible
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep a ref so the AppState callback always calls the latest onDismiss without
+  // re-subscribing the listener on every render (onDismiss is a stable useCallback
+  // in SessionScreen, but the ref pattern guards against any future changes).
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => { onDismissRef.current = onDismiss; }, [onDismiss]);
+
+  // Auto-dismiss and background-dismiss while the modal is open.
+  // - Timer: partner reactions stay visible as long as long solo reminders (6 min) so
+  //   the user has time to notice them even if they glance away briefly.
+  // - AppState: immediately dismiss if the user backgrounds the app so a stale popup
+  //   does not greet them when they return later.
   useEffect(() => {
-    if (visible) {
-      timerRef.current = setTimeout(onDismiss, AUTO_DISMISS_MS);
-    }
+    if (!visible) { return; }
+
+    const timer = setTimeout(() => onDismissRef.current(), POPUP_AUTO_DISMISS_REMINDER_MS);
+    const appStateSub = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') { onDismissRef.current(); }
+    });
+
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
+      clearTimeout(timer);
+      appStateSub.remove();
     };
-    // onDismiss is stable (useCallback in SessionScreen)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const backdropOpacity = isDark ? 0.72 : 0.36;
