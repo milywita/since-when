@@ -1165,10 +1165,18 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     list: { paddingHorizontal: sp.gutter, paddingBottom: 100, gap: sp.md },
     historyLoading: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 48 },
 
-    // Completed row
+    // Completed (Solo) row — inset to match Together card left/right bounds.
+    // Lighter than a Together card but visually inside the same timeline column.
     completedRow: {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-      paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.surface,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      marginHorizontal: 0,
+      marginBottom: 6,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: isDark ? c.border : c.borderInner,
+      backgroundColor: isDark ? 'transparent' : c.surface,
     },
     completedLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 8 },
     soloModeBadge: {
@@ -1347,7 +1355,7 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     dayNavArrow: { width: 32, alignItems: 'center' },
     dayNavArrowText: { fontSize: 24, fontWeight: '300', lineHeight: 28 },
     dayNavLabel: { fontSize: 15, fontWeight: '600' },
-    historyDayContent: { paddingHorizontal: 20, paddingBottom: 100, gap: 0 },
+    historyDayContent: { paddingHorizontal: 20, paddingBottom: 100, gap: 4 },
     historyBottomPad: { height: 20 },
 
     dayEmptyState: { flex: 1, alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 },
