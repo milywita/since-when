@@ -77,3 +77,29 @@ export async function showSessionTimerNotificationNow(): Promise<void> {
     },
   });
 }
+
+// ─── Reminder preview (dev / showcase) ───────────────────────────────────────
+
+const REMINDER_PREVIEW_CHANNEL_ID = 'reminder-preview';
+
+export async function ensureReminderPreviewChannel(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  await notifee.createChannel({
+    id: REMINDER_PREVIEW_CHANNEL_ID,
+    name: 'Reminder preview',
+    importance: AndroidImportance.HIGH,
+  });
+}
+
+export async function showReminderPreviewNotification(title: string, body: string): Promise<void> {
+  await notifee.displayNotification({
+    title,
+    body,
+    android: {
+      channelId: REMINDER_PREVIEW_CHANNEL_ID,
+      pressAction: { id: 'default' },
+    },
+  });
+}

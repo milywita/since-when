@@ -30,7 +30,56 @@ import { subscribeToUserProfile, setActiveSession } from '../services/userServic
 import { getSessionOnce } from '../services/sessionService';
 import { useTaskEstimatePresets } from '../context/TaskEstimatePresetsContext';
 import { SETTINGS_DEFAULTS } from '../types/settingsPreferences';
+import type { SarcasmLevel } from '../types/settingsPreferences';
+import {
+  requestNotificationPermissions,
+  ensureReminderPreviewChannel,
+  showReminderPreviewNotification,
+} from '../services/notificationService';
 import { TaskFormBottomSheet, type TaskFormCommitPayload } from '../components/tasks/TaskFormBottomSheet';
+
+// ─── Reminder preview showcase ────────────────────────────────────────────────
+
+const SARCASM_TONES: SarcasmLevel[] = ['formal', 'softie', 'sarcastic', 'mystic'];
+
+const TONE_EMOJI: Record<SarcasmLevel, string> = {
+  formal: '📋',
+  softie: '🍬',
+  sarcastic: '😏',
+  mystic: '✨',
+};
+
+const TONE_SHORT: Record<SarcasmLevel, string> = {
+  formal: 'Formal',
+  softie: 'Softie',
+  sarcastic: 'Sarc',
+  mystic: 'Mystic',
+};
+
+const REMINDER_PREVIEW_MESSAGES: Record<SarcasmLevel, { title: string; body: string }[]> = {
+  formal: [
+    { title: 'Task Reminder', body: 'This task is overdue.' },
+    { title: 'Pending Task', body: 'You have an incomplete task that needs attention.' },
+    { title: 'Task Update', body: 'A task on your list has been waiting for a response.' },
+  ],
+  softie: [
+    { title: '🌸 Gentle Nudge', body: 'Tiny reminder — your task is waiting for you.' },
+    { title: '💛 Hey there!', body: "Just a lil' reminder that your task is patiently waiting." },
+    { title: '🌷 You got this!', body: "You've got something on your list. No rush, but... you got this!" },
+  ],
+  sarcastic: [
+    { title: '😏 Oh, hi there', body: 'You said later. Later brought receipts.' },
+    { title: '🙃 Just checking in', body: "Still procrastinating? Bold strategy. Let's see how it plays out." },
+    { title: '👀 Since when?', body: "That task has aged like fine wine. Unfortunately it's not wine." },
+  ],
+  mystic: [
+    { title: '🔮 The stars have aligned', body: 'The task has awakened. The prophecy remains unfinished.' },
+    { title: '✨ A vision appears', body: 'The ancient scroll of your task trembles, awaiting its chosen one.' },
+    { title: '🌙 The oracle speaks', body: 'Time is but an illusion. Your task, however, is very real.' },
+  ],
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function useNow(intervalMs = 1000) {
   const [now, setNow] = useState(Date.now());
@@ -617,6 +666,21 @@ export default function HomeScreen({ navigation }: Props) {
   const now = useNow();
   const { opacity: flashOpacity, message: flashMessage, flash } = useDoneFlash();
 
+  const previewIndexRef = useRef<Record<SarcasmLevel, number>>({ formal: 0, softie: 0, sarcastic: 0, mystic: 0 });
+
+  const handlePreviewReminder = useCallback(async (tone: SarcasmLevel) => {
+    const granted = await requestNotificationPermissions();
+    if (!granted) {
+      flash('Notification permission denied.');
+      return;
+    }
+    await ensureReminderPreviewChannel();
+    const msgs = REMINDER_PREVIEW_MESSAGES[tone];
+    const idx = previewIndexRef.current[tone] % msgs.length;
+    previewIndexRef.current[tone] = idx + 1;
+    await showReminderPreviewNotification(msgs[idx].title, msgs[idx].body);
+  }, [flash]);
+
   const [rejoinSessionId, setRejoinSessionId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -929,9 +993,28 @@ export default function HomeScreen({ navigation }: Props) {
       )}
       </View>
 
+      {/* ── Reminder preview bar (dev / showcase) ─── */}
+      <View style={[s.reminderPreviewBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <Text style={[s.reminderPreviewTitle, { color: c.textMuted }]}>🔔 PREVIEW REMINDERS</Text>
+        <View style={s.reminderPreviewChips}>
+          {SARCASM_TONES.map(tone => (
+            <TouchableOpacity
+              key={tone}
+              style={[s.reminderPreviewChip, { backgroundColor: c.surface, borderColor: c.border }]}
+              onPress={() => handlePreviewReminder(tone).catch(console.error)}
+              activeOpacity={0.65}>
+              <Text style={s.reminderPreviewChipEmoji}>{TONE_EMOJI[tone]}</Text>
+              <Text style={[s.reminderPreviewChipText, { color: c.text }]}>{TONE_SHORT[tone]}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
       {/* ── FAB ──────────────────────────────────────── */}
       {tab === 'active' && (
-        <TouchableOpacity style={s.fab} onPress={() => setModalVisible(true)}>
+        <TouchableOpacity
+          style={[s.fab, { bottom: Math.max(insets.bottom, 8) + 96 }]}
+          onPress={() => setModalVisible(true)}>
           <Text style={[s.fabText, { color: c.primaryText }]}>+</Text>
         </TouchableOpacity>
       )}
@@ -1231,6 +1314,42 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
       flexShrink: 0,
     },
     queueDoneBtnText: { fontSize: 13, fontWeight: '600' },
+
+    // Reminder preview bar
+    reminderPreviewBar: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.border,
+      backgroundColor: isDark ? c.surfaceRaised : c.surface,
+      paddingTop: 14,
+      paddingHorizontal: sp.gutter,
+      gap: 10,
+    },
+    reminderPreviewTitle: {
+      fontSize: 10,
+      fontWeight: '700',
+      letterSpacing: 1.2,
+    },
+    reminderPreviewChips: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    reminderPreviewChip: {
+      flex: 1,
+      borderRadius: 12,
+      borderWidth: 1,
+      paddingVertical: 10,
+      alignItems: 'center',
+      gap: 4,
+    },
+    reminderPreviewChipEmoji: {
+      fontSize: 18,
+      lineHeight: 22,
+    },
+    reminderPreviewChipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      letterSpacing: 0.2,
+    },
 
     // FAB
     fab: {
