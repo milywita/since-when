@@ -324,13 +324,14 @@ function CompletedRow({ task, c, s }: CompletedRowProps) {
     <View style={s.completedRow}>
       <View style={s.completedLeft}>
         <View style={s.soloModeBadge}>
-          <Text style={[s.soloModeBadgeText, { color: c.textDim }]}>SOLO</Text>
+          {/* color is baked into soloModeBadgeText in buildStyles (accent tint) */}
+          <Text style={s.soloModeBadgeText}>SOLO</Text>
         </View>
-        <Text style={[s.completedTitle, { color: c.textSoft }]} numberOfLines={1}>{task.title}</Text>
+        <Text style={[s.completedTitle, { color: c.text }]} numberOfLines={1}>{task.title}</Text>
       </View>
       <View style={s.completedRight}>
-        <Text style={[s.completedTime, { color: c.textSoft }]}>{formatTime(completedAt)}</Text>
-        <Text style={[s.completedDuration, { color: c.textDim }]}>{formatElapsed(focusMs)}</Text>
+        <Text style={[s.completedTime, { color: c.text }]}>{formatTime(completedAt)}</Text>
+        <Text style={[s.completedDuration, { color: c.textMuted }]}>{formatElapsed(focusMs)}</Text>
         {task.estimatedMs !== null && (
           <Text style={[s.completedEstLabel, { color: beatEstimate ? c.success : c.dangerMuted }]}>
             {beatEstimate ? 'on time' : 'late'}
@@ -602,7 +603,7 @@ export default function HomeScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
 
   const { activeTasks, completedTasks, loading, error, addTask, completeTask, deleteTask, updateTask, reorderTasks, pinTask, unpinTask } = useTasks();
-  const { sessionHistory, loading: historyLoading } = useSessionHistory();
+  const { sessionHistory } = useSessionHistory();
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
@@ -901,7 +902,9 @@ export default function HomeScreen({ navigation }: Props) {
       {/* ── History tab ──────────────────────────────── */}
       {tab === 'history' && (
         <>
-          {(loading || historyLoading) ? (
+          {loading ? (
+            // Spin only while the task subscription is initialising. Together sessions
+            // stream in separately — solo rows must never be gated behind them.
             <View style={s.historyLoading}>
               <ActivityIndicator color={c.textMuted} />
             </View>
@@ -1202,25 +1205,33 @@ function buildStyles(thm: AppTheme, isDark: boolean) {
     list: { paddingHorizontal: sp.gutter, paddingBottom: 100, gap: sp.md },
     historyLoading: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 48 },
 
-    // Completed (Solo) row — inset to match Together card left/right bounds.
-    // Lighter than a Together card but visually inside the same timeline column.
+    // Completed (Solo) row — full surface card, readable in both themes.
+    // surfaceRaised on dark gives the card visible lift against the page;
+    // surface on light matches other card components. The SOLO badge mirrors
+    // the accent tint used by Together cards so history feels visually unified.
     completedRow: {
       flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
       paddingVertical: 12,
-      paddingHorizontal: 12,
-      marginHorizontal: 0,
+      paddingHorizontal: 14,
       marginBottom: 6,
-      borderRadius: 8,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: isDark ? c.border : c.borderInner,
-      backgroundColor: isDark ? 'transparent' : c.surface,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: isDark ? c.borderStrong : c.border,
+      backgroundColor: isDark ? c.surfaceRaised : c.surface,
     },
     completedLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', marginRight: 12, gap: 8 },
     soloModeBadge: {
-      backgroundColor: c.surface, borderRadius: 4, borderWidth: 1,
-      borderColor: c.border, paddingHorizontal: 5, paddingVertical: 2,
+      borderRadius: 4, borderWidth: 1,
+      paddingHorizontal: 5, paddingVertical: 2,
+      ...(isDark
+        ? { backgroundColor: c.accentSurface, borderColor: c.accentSurfaceBorder }
+        : { backgroundColor: '#e8ebfb', borderColor: '#a8b4f0' }),
     },
-    soloModeBadgeText: { fontSize: 9, fontWeight: '700', letterSpacing: 1.5 },
+    // Color is theme-aware here; callers must not override it inline.
+    soloModeBadgeText: {
+      fontSize: 9, fontWeight: '700', letterSpacing: 1.5,
+      color: isDark ? c.accentLight : c.accent,
+    },
     completedTitle: { fontSize: 15, flex: 1, marginRight: sp.md, textDecorationLine: 'line-through' },
     completedRight: { alignItems: 'flex-end', gap: 2 },
     completedTime: { fontSize: 12, fontVariant: ['tabular-nums'] },

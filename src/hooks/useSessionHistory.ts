@@ -5,25 +5,19 @@ import type { SessionHistoryRecord } from '../types/Session';
 
 export function useSessionHistory() {
   const [sessionHistory, setSessionHistory] = useState<SessionHistoryRecord[]>([]);
-  const [loading, setLoading] = useState(true);
 
   const userId = auth().currentUser?.uid ?? '';
 
   useEffect(() => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
+    if (!userId) { return; }
+    // Together sessions stream in when Firestore responds; callers do not block
+    // on this subscription — solo history must always render independently.
     const unsub = subscribeToSessionHistory(
       userId,
-      records => {
-        setSessionHistory(records);
-        setLoading(false);
-      },
-      () => setLoading(false),
+      records => setSessionHistory(records),
     );
     return unsub;
   }, [userId]);
 
-  return { sessionHistory, loading };
+  return { sessionHistory };
 }

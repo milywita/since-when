@@ -252,12 +252,27 @@ export function subscribeToTasks(
   onUpdate: (tasks: Task[]) => void,
   onError?: (error: Error) => void,
 ): () => void {
+  // Do NOT use .orderBy('position') here.
+  // Firestore silently excludes documents that lack the queried field, so tasks
+  // created before the position system (no `position` in Firestore) would be
+  // invisibly dropped — they'd never reach completedTasks and vanish from history.
+  // We sort active tasks by position in JS after the snapshot arrives instead.
   return tasksCollection(userId)
-    .orderBy('position', 'asc')
     .onSnapshot(
       snapshot => {
         if (!snapshot) { return; }
         const tasks: Task[] = snapshot.docs.map(doc => doc.data() as Task);
+        // Sort active tasks by position so the queue stays in the right order.
+        // Legacy tasks without a position field sort to the end (Number.MAX_SAFE_INTEGER)
+        // rather than jumping to position 0 / front of queue.
+        tasks.sort((a, b) => {
+          const aActive = a.completedAt === null;
+          const bActive = b.completedAt === null;
+          if (!aActive && !bActive) { return 0; }
+          if (!aActive) { return 1; }
+          if (!bActive) { return -1; }
+          return (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER);
+        });
         onUpdate(tasks);
       },
       error => {
